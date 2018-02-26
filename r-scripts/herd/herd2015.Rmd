@@ -1,0 +1,95 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+# Read Data
+
+```{r}
+# clear the workspace
+rm(list=ls())
+
+# include user functions
+library(odbc)
+library(tidyverse)
+
+# assign academic year
+year <- 2015L
+
+# infile URL
+spec <- "https://www.nsf.gov/statistics/herd/data/exp2015.csv"
+
+#output file
+outfile<- paste0("/Temp/herdi", year, ".csv")
+
+# read the data
+dat <- as_tibble(read.csv(spec,
+                          stringsAsFactors = FALSE))
+
+
+dat
+```
+
+# Institutions Table
+
+```{r}
+institutions <- dat %>%
+  mutate(FICE = inst_id,
+         `Institution Name` = inst_name_long,
+         City = inst_city,
+         State = inst_state_code,
+         ZIP = inst_zip,
+         HBCU = recode(hbcu_flag,
+                       `1`='HBCU',
+                       `0`='Not HBCU',
+                       .default='Unknown'),
+         `High Hispanic Enrollment` = ifelse(hhe_flag==1, 'High Hispanic Enrollment','Not High Hispanic Enrollment'),
+         `Medical School` = ifelse(med_sch_flag, 'Has Medical School','No Medical School'),
+         `Academic institution` = ifelse(toi_code==1, 'Academic', 'Non-academic'),
+         `Highest Degree Granted` = recode(hdg_code,
+                                           `1`='Doctorate',
+                                           `2`="Master's",
+                                           `3`="Bachelor's",
+                                           `4`="Associates's",
+                                           `5`='No degree',
+                                           `6`='Professional degree'),
+         `Type of Control` = recode(toc_code,
+                                    `1` = 'Public',
+                                    `2` = 'Private',
+                                    .default = 'Unknown')) %>%
+  group_by(FICE,
+           `Institution Name`,
+           City,
+           State,
+           ZIP,
+           HBCU,
+           `High Hispanic Enrollment`,
+           `Medical School`,
+           `Academic institution`,
+           `Highest Degree Granted`,
+           `Type of Control`) %>%
+  summarise(rows = n()) %>%
+  ungroup()
+
+institutions
+```
+
+# Base Data
+
+```{r}
+herd <- dat %>%
+  filter(data > 0) %>%
+  select(inst_id,
+         year,
+         questionnaire_no,
+         row,
+         column,
+         data) %>%
+  mutate(questionnaire_no = str_to_lower(questionnaire_no),
+         row = str_to_lower(row),
+         column = str_to_lower(column),
+         data = data * 1000)
+
+herd
+```
+
