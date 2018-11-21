@@ -1,0 +1,133 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+# Setup
+
+```{r}
+# clear workspace
+rm(list=ls())
+
+library(odbc)
+library(tidyverse)
+
+# access data via net
+netLoad <- function(fileUrl, fileName)
+{
+  #Download data file
+  temp <- tempfile()
+  
+  download.file(fileUrl,
+                temp)
+  
+  data <- read_csv(unz(temp, fileName))
+  
+  unlink(temp)
+  # rm(temp)
+  
+  names(data) <- tolower(names(data))
+  return(data)
+}
+
+# "U:/Data/EX/z_external_dapaste0("C:/Temp/comp_dat", year, ".csv")ta/IPEDS_Completions/2014_15/Provisional/c2015_a.csv"
+odbcString <- "cdw"
+
+urlStub <- "http://nces.ed.gov/ipeds/datacenter/data/"
+
+# Assign academic year
+year <- 2016
+archive <- 'c2016_a.zip'
+infile <- 'c2016_a.csv'
+```
+
+# Load
+
+```{r}
+# Unzip and read the datca
+dat <- netLoad(paste0(urlStub, archive), infile)
+
+dat
+```
+
+# Transform
+
+```{r}
+completions <- dat %>%
+  gather(caianm,
+         caianw,
+         casiam,
+         casiaw,
+         cbkaam,
+         cbkaaw,
+         chispm,
+         chispw,
+         cnhpim,
+         cnhpiw,
+         cwhitm,
+         cwhitw,
+         c2morm,
+         c2morw,
+         cunknm,
+         cunknw,
+         cnralm,
+         cnralw,
+         key = 'variable',
+         value = 'Awards') %>%
+  separate(variable, c('surv','code'), 1) %>%
+  separate(code, c('race','sex'), -1) %>%
+  filter(Awards > 0) %>%
+  mutate(Unitid = unitid,
+         ReportedCipCode = cipcode,
+         MajorNumber = majornum,
+         AwardLevelCode = as.integer(awlevel),
+         YearId = year,
+         SexCode = recode(sex,
+                          'm' = 'M',
+                          'w' = 'F'),
+         RaceEthnicity = recode(race,
+                                'aian' = 'Native American or Alaska Native',
+                                'asia' = 'Asian',
+                                'bkaa' = 'Black or African American',
+                                'hisp' = 'Hispanic',
+                                'nhpi' = 'Native Hawaiian or Pacifc Islander',
+                                'whit' = 'White',
+                                '2mor' = 'Two or More Races',
+                                'unkn' = 'Unknown',
+                                'nral' = 'Non-resident Alien',
+                                .default = 'Not Specified')) %>%
+  group_by(Unitid,
+           YearId,
+           ReportedCipCode,
+           MajorNumber,
+           AwardLevelCode,
+           RaceEthnicity,
+           SexCode) %>%
+  summarise(Awards = sum(Awards))
+
+completions
+
+```
+
+# Sniff Test
+
+```{r}
+completions %>%
+  filter(RaceEthnicity == 'Not Specified') %>%
+  head
+```
+
+# Write Data
+
+```{r}
+con <- dbConnect(odbc::odbc(), odbcString)
+
+response <- dbSendQuery(con, paste0('DELETE FROM dbo.DegreeCompletions WHERE YearId = ', year))
+dbClearResult(response)
+
+system.time({ dbWriteTable(con, 'DegreeCompletions', completions, append=TRUE) })
+
+dbDisconnect(con)
+
+```
+
