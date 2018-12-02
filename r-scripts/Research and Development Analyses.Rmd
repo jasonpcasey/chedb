@@ -10,18 +10,21 @@ output: html_document
 knitr::opts_chunk$set(fig.width = 8,
                       fig.asp = 0.618,
                       echo = TRUE)
+knitr::knit_engines$set(python = reticulate::eng_python)
 
 library(DBI)
 library(odbc)
 library(kableExtra)
 library(tidyverse)
 
-grabData <- function(dbString, queryString)
+set.seed(1965)
+
+read_db <- function(db, query_string)
 {
   # Open a connection
-  connection <- dbConnect(odbc::odbc(), dbString)
+  connection <- dbConnect(odbc::odbc(), db)
   
-  response <- dbSendQuery(connection, queryString)
+  response <- dbSendQuery(connection, query_string)
   tbl <- dbFetch(response)
   dbClearResult(response)
   
@@ -31,8 +34,22 @@ grabData <- function(dbString, queryString)
   return(as_tibble(tbl))
 }
 
-institutions <- grabData("cdw", "SELECT * FROM dbo.NsfRdInstitutions")
-rd <- grabData("cdw", "SELECT * FROM dbo.NsfRdByField")
+write_db <- function(frame, db, tab, add = TRUE) {
+  con <- dbConnect(odbc::odbc(), db)
+  
+  answer <- system.time({ dbWriteTable(con,
+                                       tab,
+                                       frame,
+                                       overwrite=!add,
+                                       append = add) })
+  
+  dbDisconnect(con)
+  
+  return(answer)
+}
+
+institutions <- read_db("cdw", "SELECT * FROM dbo.NsfRdInstitutions")
+rd <- read_db("cdw", "SELECT * FROM dbo.NsfRdByField")
 
 ```
 
