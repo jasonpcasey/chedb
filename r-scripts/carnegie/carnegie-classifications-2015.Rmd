@@ -1,0 +1,152 @@
+---
+title: "Load Carnegie Classifications"
+author: "Jason P. Casey"
+date: 2018-11-26
+output: html_notebook
+---
+
+ 
+
+```{r setup}
+# knitr options
+knitr::opts_chunk$set(fig.width = 8,
+                      fig.asp = 0.618,
+                      echo = TRUE)
+
+# include user functions
+library(DBI)
+library(odbc)
+library(readxl)
+library(tidyverse)
+
+write_db <- function(frame, db, tab, add = TRUE) {
+  con <- dbConnect(odbc::odbc(), db)
+  
+  answer <- system.time({ dbWriteTable(con,
+                                       tab,
+                                       frame,
+                                       overwrite=!add,
+                                       append = add
+                                       ) })
+  
+  dbDisconnect(con)
+  
+  return(answer)
+}
+
+data <- read_excel("../../data/CCIHE2015-PublicDataFile.xlsx",
+                            sheet = "Data") %>%
+  rename_all(tolower) %>%
+  select(unitid, cc2000:basic2015)
+
+
+labels <- read_excel("../../data/CCIHE2015-PublicDataFile.xlsx",
+                            sheet = "Labels") %>%
+  rename_all(tolower) %>%
+  rename(variable_name = label,
+         value_name = label__1) %>%
+  filter(str_length(value) > 0) %>%
+  fill(variable,
+       variable_name) %>%
+  mutate(value = as.numeric(value),
+        variable = tolower(str_trim(variable)))
+
+labels_2000 <- labels %>%
+  filter(variable == "cc2000") %>%
+  select(cc2000 = value,
+         carnegie_2000 = value_name)
+
+
+labels_2005 <- labels %>%
+  filter(variable == "basic2005") %>%
+  select(basic2005 = value,
+         carnegie_2005 = value_name)
+
+
+labels_2010 <- labels %>%
+  filter(variable == "basic2010") %>%
+  select(basic2010 = value,
+         carnegie_2010 = value_name)
+
+
+labels_2015 <- labels %>%
+  filter(variable == "basic2015") %>%
+  select(basic2015 = value,
+         carnegie_2015 = value_name)
+
+
+data <- data %>%
+  left_join(labels_2000) %>%
+  left_join(labels_2005) %>%
+  left_join(labels_2010) %>%
+  left_join(labels_2015)
+  
+
+```
+
+# Inspect Values
+
+```{r}
+data
+```
+
+# Inspect Labels
+
+```{r}
+labels
+```
+
+# Inspect 2005
+
+```{r}
+labels_2005
+```
+
+# Write to Database
+
+```{r}
+system.time({
+  data %>%
+    write_db("cdw",
+             "carnegie_classes",
+             add = FALSE)
+})
+```
+
+# Athletic Conferences
+
+```{r}
+fix_names <- function(input) {
+  answer <- str_replace(input, "\\bConf\\b", "Conference")
+  answer <- str_replace(input, "\\bAssoc\\b", "Association")
+  answer <- str_replace(input, "\\bAth\\b", "Athletic")
+  return(answer)
+}
+
+conferences <- read_excel("../../data/athletic_conferences.xlsx") %>%
+  count(conf_id, conference_name) %>%
+  mutate(conference_name = fix_names(str_trim(conference_name)))
+
+conferences
+```
+
+```{r}
+table(conferences$conf_id)
+```
+
+```{r}
+conferences %>%
+  count(conf_id) %>%
+  filter(nn > 1)
+```
+
+```{r}
+system.time({
+  conferences %>%
+    select(-n) %>%
+    write_db("cdw",
+             "AthleticConferences",
+             add = FALSE)
+})
+```
+
