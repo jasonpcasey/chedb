@@ -1,0 +1,122 @@
+---
+title: "US News Data"
+author: "Jason P. Casey"
+date: 2018-11-27
+output: html_notebook
+params:
+  year:
+    label: "Issue Year"
+    value: 2019
+---
+
+```{r setup}
+# knitr options
+knitr::opts_chunk$set(fig.width = 8,
+                      fig.asp = 0.618,
+                      echo = TRUE)
+
+# include user functions
+library(DBI)
+library(odbc)
+library(lubridate)
+library(kableExtra)
+library(tidyverse)
+
+# access data via net
+net_load <- function(file_url, file_name)
+{
+  #Download data file
+  temp <- tempfile()
+  
+  download.file(file_url,
+                temp)
+  
+  data <- read_csv(unz(temp, file_name),
+                        locale = locale(encoding = "latin1")) %>%
+    rename_all(tolower)
+  
+  unlink(temp)
+  rm(temp)
+  
+  return(data)
+}
+
+read_db <- function(db, query_string)
+{
+  # Open a connection
+  connection <- dbConnect(odbc::odbc(), db)
+  
+  response <- dbSendQuery(connection, query_string)
+  tbl <- dbFetch(response)
+  dbClearResult(response)
+  
+  # disconnect from the database
+  dbDisconnect(connection)
+  
+  return(as_tibble(tbl))
+}
+
+write_db <- function(frame, db, tab, add = TRUE) {
+  con <- dbConnect(odbc::odbc(), db)
+  
+  answer <- system.time({ dbWriteTable(con,
+                                       tab,
+                                       frame,
+                                       overwrite=!add,
+                                       append = add
+                                       ) })
+  
+  dbDisconnect(con)
+  
+  return(answer)
+}
+
+
+# load datafiles
+unl <- 181464
+neighbors <- c(100751,104151,104179,110671,
+               120883,122612,126818,131283,
+               131520,144740,153603,155317,
+               171128,174914,178396,186584,
+               190044,202480,212106,
+               216339,230764)
+big10 <- c(145637,147767,151351,153658,
+           163286,170976,171100,174066,
+           186380,204796,214777,240444,
+           243780)
+
+institutions <- read_db("cdw", "SELECT * FROM dbo.Institutions")
+us_news <- read_db("usn", "SELECT * FROM dbo.rankingData")
+usn_wide <- read_db("usn", "SELECT * FROM dbo.rankingData_wide")
+
+
+```
+# Inspect Data
+
+## Institutions
+
+```{r}
+institutions
+```
+
+## US News Long File
+
+```{r}
+us_news
+```
+
+## US News Wide File
+
+```{r}
+usn_wide
+```
+
+# Write Data Files
+
+```{r}
+system.time({
+  usn_wide %>%
+    write_csv("../../data/usnews.csv", na = "")
+})
+```
+
