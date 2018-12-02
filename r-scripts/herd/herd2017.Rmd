@@ -8,18 +8,23 @@ output: html_notebook
 # Read Crosswalk
 
 ```{r setup}
+knitr::opts_chunk$set(fig.width = 8,
+                      fig.asp = 0.618,
+                      echo = TRUE)
+knitr::knit_engines$set(python = reticulate::eng_python)
+
 # include user functions
 library(DBI)
 library(odbc)
 library(readxl)
 library(tidyverse)
 
-grabData <- function(dbString, queryString)
+read_db <- function(db, query_string)
 {
   # Open a connection
-  connection <- dbConnect(odbc::odbc(), dbString)
+  connection <- dbConnect(odbc::odbc(), db)
   
-  response <- dbSendQuery(connection, queryString)
+  response <- dbSendQuery(connection, query_string)
   tbl <- dbFetch(response)
   dbClearResult(response)
   
@@ -29,26 +34,23 @@ grabData <- function(dbString, queryString)
   return(as_tibble(tbl))
 }
 
-# frame_fixes <- function(x) {
-#   cols <- c('bsurvid',
-#             'birthyear')
-#   
-#   x_cols <- colnames(x)
-#   
-#   for (i in seq_along(cols)) {
-#     if (!cols[i] %in% x_cols)
-#     {
-#       x[cols[i]] <- NA
-#     }
-#   }
-#   
-#   x %>%
-#     mutate(bsurvid = as.integer(bsurvid),
-#            birthyear = as.integer(birthyear))
-# }
+write_db <- function(frame, db, tab, add = TRUE) {
+  con <- dbConnect(odbc::odbc(), db)
+  
+  answer <- system.time({ dbWriteTable(con,
+                                       tab,
+                                       frame,
+                                       overwrite=!add,
+                                       append = add
+                                       ) })
+  
+  dbDisconnect(con)
+  
+  return(answer)
+}
 
-
-xwalk <- grabData("cdw", 'SELECT * FROM extract.NsfIpedsBridge')
+xwalk <- read_db("cdw", "SELECT * FROM extract.NsfIpedsBridge")
+institutions <- read_db("cdw", "SELECT * FROM dbo.institutions")
 
 ```
 
@@ -70,294 +72,162 @@ herd_meta
 
 ```
 
-# Inspect Data
-
-```{r inspect}
-herd_meta$data[[6]]
-```
-
 # Make HERD Data File
 
 ```{r}
 herd <- herd_meta %>%
   select(data) %>%
   unnest() %>%
+  mutate(inst_id = as.integer(inst_id)) %>%
+  inner_join(xwalk, by = c("inst_id" = "NsfSurveyId")) %>%
   # filter(data > 0) %>%
-  mutate(inst_id = as.integer(inst_id),
-         year = as.integer(year),
-         ipeds_unitid = as.integer(ipeds_unitid),
+  mutate(year_id = as.integer(year),
+         unitid = as.integer(ipeds_unitid),
+         unitid = ifelse(is.na(unitid), as.integer(RollupId), as.integer(unitid)),
          hbcu_flag = as.integer(hbcu_flag),
          med_sch_flag = as.integer(as.logical(med_sch_flag)),
          hhe_flag = as.integer(hhe_flag),
          toi_code = as.integer(toi_code),
          hdg_code = as.integer(hdg_code),
-         tod_code = as.integer(toc_code))
+         tod_code = as.integer(toc_code)) %>%
+  select(inst_id, ncses_inst_id, unitid, unitid_xwalk = Unitid, year_id, hbcu_flag:column, tod_code, data)
+
+rm(herd_meta)
 
 herd
 ```
 
-# Fice Validation: Find Mismatches
+# Write Raw HERD Data to Database
 
 ```{r}
-# Match this to full institution table by unitid to get a better picture
-# potentially add rollup to another table or simplify nsf crosswalk
+system.time({
+  herd %>%
+    write_db("cdw", "raw_herd", add = FALSE)
+})
+```
+
+# Read HERD Table into Memory
+
+```{r}
+system.time({
+  herd <- read_db("cdw", "SELECT * FROM [dbo].[raw_herd]")
+})
+```
+
+# Inspect Contents of HERD Table
+
+```{r}
+herd %>%
+  count(questionnaire_no, question, row, column)
+```
+
+# Check Institution Codes
+
+```{r}
 unique <- herd %>%
-  mutate(Unitid = ipeds_unitid) %>%
-  group_by(Unitid, inst_id) %>%
-  summarise(maxyear = max(year)) %>%
+  group_by(unitid, inst_id, ncses_inst_id, unitid_xwalk, med_sch_flag) %>%
+  summarise(last_year_reported = max(year_id)) %>%
   ungroup()
 
 mismatch <- unique %>%
-  anti_join(xwalk)
+  # filter(last_year_reported == 2017) %>%
+  anti_join(institutions)
 
-mismatch
+mismatch 
+# 
+# %>%
+#   inner_join(herd, by="inst_id")
+
 
 ```
+
+# Institution Level Data Table
 
 ```{r}
-fice <- herd %>%
-  mutate(NsfSurveyId = inst_id) %>%
-  group_by(NsfSurveyId, ipeds_unitid) %>%
-  summarise(`Last Year` = max(year)) %>%
-  ungroup()
+fix_null <- function(x) {
+  ifelse(is.na(x), 0, x)
+}
 
-mismatch <- fice %>%
-  anti_join(xwalk)
+inst_data <- herd %>%
+  filter(questionnaire_no %in% c("01.a", "01.b", "01.c", "01.d", "01.e", "01.f", "01.g",
+                                 "04")) %>%
+  select(inst_id:inst_zip, questionnaire_no, data) %>%
+  mutate(data = data * 1000) %>%
+  spread(key = "questionnaire_no", value = "data") %>%
+  mutate(federal_government = fix_null(`01.a`),
+         state_and_local_government = fix_null(`01.b`),
+         business = fix_null(`01.c`),
+         nonprofit_organizations = fix_null(`01.d`),
+         institutional_funds = fix_null(`01.e`),
+         other_sources = fix_null(`01.f`),
+         total_rd_expenses = fix_null(`01.g`),
+         medical_school_expenses = fix_null(`04`),
+         non_medical_rd = total_rd_expenses - medical_school_expenses) %>%
+  select(inst_id:inst_zip, federal_government:non_medical_rd)
 
-mismatch
-
+inst_data
 ```
+
+# Detail Data Table
 
 ```{r}
-xwalk %>%
-  filter(Unitid %in% mismatch$ipeds_unitid)
+herd_details <- herd %>%
+  mutate(data = ifelse(is.na(data), 0, data * 1000)) %>%
+  filter(column %in% c("DOD",
+                       "DOE",
+                       "HHS",
+                       "NASA",
+                       "NSF",
+                       "USDA",
+                       "Other agencies",
+                       "State and local government",
+                       "Business",
+                       "Institution funds",
+                       "Nonprofit organziations")) %>%
+  separate(questionnaire_no, c("rownum","academic_field_id"), 2) %>%
+  filter(as.integer(rownum) %in% c(9, 11),
+         academic_field_id %in% c('A','B01','B02','B03','B04','B05','B06','B07','B08',
+                                  'B09','C01','C02','C03','C04','D01','D02','D03','D04',
+                                  'D05','E','F01','F02','F03','F04','F05','G','H01',
+                                  'H02','H03','H04','H05','I','J01','J02','J03','J04',
+                                  'J05','J06','J07','J08')) %>%
+  mutate(funding_type = recode(as.integer(rownum),
+                `9`="Federal",
+                `11`="Non-federal")) %>%
+  select(inst_id, unitid, ncses_inst_id, year_id, funding_type, agency_id = column, academic_field_id, expenditure = data)  # %>%
+  # group_by(inst_id, unitid, ncses_inst_id, year_id, funding_type, agency_id, academic_field_id) %>%
+  # summarise(expenditure = sum(expenditure, na.rm = TRUE)) %>%
+  # ungroup()
+
+herd_details
 ```
 
-# Add Standardized Fice
+# Write Matched Records to Database
 
 ```{r}
-fice <- fice %>%
-  inner_join(xwalk) %>%
-  select(NsfSurveyId, RdFice, maxyear)
-
-fice
+system.time({
+  unique %>%
+    select(inst_id:inst_zip, last_reported_year_id = last_year_reported) %>%
+    write_db("cdw", "nsf_bridge", add = FALSE)
+})
 ```
 
-# Institutions Table
+# Write Institution Data
 
 ```{r}
-institutions <- dat %>%
-  mutate(NsfSurveyId = inst_id,
-         `Institution Name` = inst_name_long,
-         City = inst_city,
-         State = inst_state_code,
-         ZIP = inst_zip,
-         HBCU = recode(hbcu_flag,
-                       `1`='HBCU',
-                       `0`='Not HBCU',
-                       .default='Unknown'),
-         `High Hispanic Enrollment` = ifelse(hhe_flag==1, 'High Hispanic Enrollment','Not High Hispanic Enrollment'),
-         `Medical School` = ifelse(med_sch_flag, 'Has Medical School','No Medical School'),
-         `Academic Institution` = ifelse(toi_code==1, 'Academic', 'Non-academic'),
-         `Highest Degree Granted` = recode(hdg_code,
-                                           `1`='Doctorate',
-                                           `2`="Master's",
-                                           `3`="Bachelor's",
-                                           `4`="Associates's",
-                                           `5`='No degree',
-                                           `6`='Professional degree'),
-         `Type of Control` = recode(toc_code,
-                                    `1` = 'Public',
-                                    `2` = 'Private',
-                                    .default = 'Unknown')) %>%
-  inner_join(fice) %>%
-  filter(year == maxyear) %>%
-  group_by(RdFice, 
-           `Institution Name`,
-           City,
-           State,
-           ZIP,
-           HBCU,
-           `High Hispanic Enrollment`,
-           `Medical School`,
-           `Academic Institution`,
-           `Highest Degree Granted`,
-           `Type of Control`) %>%
-  summarise(rows = n()) %>%
-  ungroup()
-
-institutions
+system.time({
+  inst_data %>%
+    write_db("cdw", "nsf_herd_institution_data", add = TRUE)
+})
 ```
 
-
-# Base Data
+# Write Detail Data
 
 ```{r}
-herd <- dat %>%
-  select(inst_id,
-         year,
-         questionnaire_no,
-         row,
-         column,
-         data) %>%
-  filter(column %in% c('DOD',
-                       'DOE',
-                       'HHS',
-                       'NASA',
-                       'NSF',
-                       'USDA',
-                       'Other agencies',
-                       'State and local government',
-                       'Business',
-                       'Institution funds',
-                       'Nonprofit organziations')) %>%
-  separate(questionnaire_no, c('rownum','AcademicFieldCode'), 2) %>%
-  # separate(row, c('BroadDisc','DetailedDisc'), sep=',') %>%
-  filter(AcademicFieldCode %in% c('A1',
-                                  'A2',
-                                  'A3',
-                                  'A4',
-                                  'A5',
-                                  'A6',
-                                  'A7',
-                                  'A8',
-                                  'B1',
-                                  'B2',
-                                  'B3',
-                                  'B4',
-                                  'C1',
-                                  'C2',
-                                  'C3',
-                                  'C4',
-                                  'D',
-                                  'E',
-                                  'F1',
-                                  'F2',
-                                  'F3',
-                                  'F4',
-                                  'G',
-                                  'H1',
-                                  'H2',
-                                  'H3',
-                                  'H4',
-                                  'I',
-                                  'J1',
-                                  'J2',
-                                  'J3',
-                                  'J4',
-                                  'J5',
-                                  'J6',
-                                  'J7',
-                                  'J8')) %>%
-  mutate(NsfSurveyId = inst_id,
-         FundingType = recode(as.integer(rownum),
-                              `9`='Federal',
-                              `11`='Non-federal'),
-         AcademicField = recode(AcademicFieldCode,
-                                'A1'='Aeronautical/Astronomical Engineering',
-                                'A2'='Bioengineering/Biomedical Engineering',
-                                'A3'='Chemical Engineering',
-                                'A4'='Civil Engineering',
-                                'A5'='Electrical Engineering',
-                                'A6'='Mechanical Engineering',
-                                'A7'='Metallurgical/Materials Engineering',
-                                'A8'='Other Engineering',
-                                'B1'='Astronomy',
-                                'B2'='Chemistry',
-                                'B3'='Physics',
-                                'B4'='Other Physical Sciences',
-                                'C1'='Atmospheric Sciences',
-                                'C2'='Earth Sciences',
-                                'C3'='Oceanography',
-                                'C4'='Other Environmental Sciences',
-                                'D'='Mathematical Sciences',
-                                'E'='Computer Sciences',
-                                'F1'='Agricultural Sciences',
-                                'F2'='Biological Sciences',
-                                'F3'='Medical Sciences',
-                                'F4'='Other Life Sciences',
-                                'G'='Psychology',
-                                'H1'='Economics',
-                                'H2'='Political Science',
-                                'H3'='Sociology',
-                                'H4'='Other Social Sciences',
-                                'I'='Other Sciences',
-                                'J1'='Education',
-                                'J2'='Law',
-                                'J3'='Humanities',
-                                'J4'='Visual and Performing Arts',
-                                'J5'='Business and Management',
-                                'J6'='Communication, Journalism, and Library Science',
-                                'J7'='Social Work',
-                                'J8'='Other Non-STEM Fields',
-                                .default='Unknown'),
-         BroadAcademicField = recode(AcademicFieldCode,
-                                     'A1'='Engineering',
-                                     'A2'='Engineering',
-                                     'A3'='Engineering',
-                                     'A4'='Engineering',
-                                     'A5'='Engineering',
-                                     'A6'='Engineering',
-                                     'A7'='Engineering',
-                                     'A8'='Engineering',
-                                     'B1'='Physical Sciences',
-                                     'B2'='Physical Sciences',
-                                     'B3'='Physical Sciences',
-                                     'B4'='Physical Sciences',
-                                     'C1'='Environmental Sciences',
-                                     'C2'='Environmental Sciences',
-                                     'C3'='Environmental Sciences',
-                                     'C4'='Environmental Sciences',
-                                     'D'='Mathematical Sciences',
-                                     'E'='Computer Sciences',
-                                     'F1'='Life Sciences',
-                                     'F2'='Life Sciences',
-                                     'F3'='Life Sciences',
-                                     'F4'='Life Sciences',
-                                     'G'='Psychology',
-                                     'H1'='Social Sciences',
-                                     'H2'='Social Sciences',
-                                     'H3'='Social Sciences',
-                                     'H4'='Social Sciences',
-                                     'I'='Other Sciences',
-                                     'J1'='Education',
-                                     'J2'='Law',
-                                     'J3'='Humanities',
-                                     'J4'='Visual and Performing Arts',
-                                     'J5'='Business and Management',
-                                     'J6'='Communication, Journalism, and Library Science',
-                                     'J7'='Social Work',
-                                     'J8'='Other Non-STEM Fields',
-                                     .default='Unknown'),
-         Agency = column,
-         FYear = year,
-         # row = str_to_lower(row),
-         Expenditure = data * 1000) %>%
-  inner_join(fice) %>%
-  group_by(RdFice, FYear, FundingType, AcademicFieldCode, AcademicField, BroadAcademicField, Agency) %>%
-  summarise(Expenditure = sum(Expenditure)) %>%
-  ungroup()
-
-herd
+system.time({
+  herd_details %>%
+    write_db("cdw", "nsf_herd_detail_data", add = TRUE)
+})
 ```
 
-```{r}
-table(herd$Question)
-```
-
-```{r}
-con <- dbConnect(odbc::odbc(), odbcString)
-
-response <- dbSendQuery(con, 'DELETE FROM dbo.NsfRdInstitutions')
-dbClearResult(response)
-
-response <- dbSendQuery(con, 'DELETE FROM dbo.NsfRdByField')
-dbClearResult(response)
-
-system.time({ dbWriteTable(con, 'NsfRdInstitutions', institutions, append=TRUE) })
-system.time({ dbWriteTable(con, 'NsfRdByField', herd, append=TRUE) })
-
-dbDisconnect(con)
-
-```
 
