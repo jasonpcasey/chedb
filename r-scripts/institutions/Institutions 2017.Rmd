@@ -78,8 +78,7 @@ read_aaude_data <- function(dbString, queryString)
   # Open a connection
   connection <- dbConnect(odbc::odbc(),
                           dbString, 
-                          UID='jpcasey',
-                          #UID=rstudioapi::showPrompt('User ID','Enter User ID'),
+                          UID=rstudioapi::showPrompt('User ID','Enter User ID'),
                           PWD=rstudioapi::askForPassword("Database Password"))
   
   tbl <- dbReadTable(connection, tab) %>%
@@ -124,7 +123,13 @@ fix_binary <- function(x) {
 # load dependencies
 states <- read_db("cdw", "SELECT * FROM states")
 institution_names <- read_excel("../../data/institution-names.xlsx")
-nsf_institutions <- read_db("cdw", "SELECT unitid, med_sch_flag FROM nsf_herd_institution_data")
+nsf_institutions <- read_db("cdw", "SELECT unitid, med_sch_flag FROM nsf_herd_institution_data") %>%
+  group_by(unitid) %>%
+  summarize(med_sch_flag = max(med_sch_flag))
+
+regents <- c(181464, 153658, 153603, 126614,
+             126818, 145637, 155317, 174066,
+             178396, 204796, 243780)
 
 read_files <- function(spec1, spec2) {
   details <- read_csv(spec2,
@@ -141,6 +146,7 @@ read_files <- function(spec1, spec2) {
     left_join(details, by = "unitid") %>%
     left_join(nsf_institutions, by = "unitid") %>%
     mutate(unitid = as.integer(unitid),
+           regents_peer = ifelse(unitid %in% regents, 1, 0),
            zip = as.character(zip),
            fips = as.integer(fips),
            service_academy = ifelse(as.integer(obereg) == 0, 1, 0),
@@ -236,7 +242,7 @@ read_files <- function(spec1, spec2) {
            web_address, fips, county_fips, service_academy,
            institution_level, control, highest_level_offering, highest_degree_offering,
            undergraduate_offering, graduate_offering, degree_granting, 
-           locale, parent_id, year_closed, close_date,
+           regents_peer, locale, parent_id, year_closed, close_date,
            cbsa_id, cbsa_type, csa_id, longitude, latitude,
            system_member, system_name, open_to_public, landgrant,
            hbcu, hospital, medical, nsf_medical_school, tribal, rotc,
