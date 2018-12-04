@@ -247,3 +247,39 @@ net_read_files <- function(file1, file2) {
            hbcu, hospital, medical, tribal, slo5,
            confno1, confno2, confno3, confno4, cyactive)
 }
+
+
+charge_type_id = recode(variable,
+                        'chg1ay1'=1,
+                        'chg1ay2'=1,
+                        'chg1ay3'=1,
+                        'chg2ay1'=2,
+                        'chg2ay2'=2,
+                        'chg2ay3'=2,
+                        'chg3ay1'=3,
+                        'chg3ay2'=3,
+                        'chg3ay3'=3,
+                        'chg4ay1'=4,
+                        'chg4ay2'=4,
+                        'chg4ay3'=4,
+                        'chg5ay1'=5,
+                        'chg5ay2'=5,
+                        'chg5ay3'=5,
+                        .default=6),
+
+
+in_district_charge = ifelse(charge_type_id > 2,
+                            as.numeric(charge),
+                            ifelse(str_detect(class, "^1"), as.numeric(charge), NA)),
+in_state_charge = ifelse(charge_type_id > 2,
+                         as.numeric(charge),
+                         ifelse(str_detect(class, "^2"), as.numeric(charge), NA)),
+out_of_state_charge = ifelse(charge_type_id > 2,
+                             as.numeric(charge),
+                             ifelse(str_detect(class, "^3"), as.numeric(charge), NA))
+
+%>%
+  group_by(unitid, year_id, year, charge_type_id) %>%
+  summarize(in_district_charge = max(in_district_charge, na.rm = TRUE),
+            in_state_charge = max(in_state_charge, na.rm = TRUE),
+            out_of_state_charge = max(out_of_state_charge, na.rm = TRUE))
