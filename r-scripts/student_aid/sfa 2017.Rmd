@@ -132,82 +132,33 @@ sfa_meta$data[[6]]
 # Merge Data
 
 ```{r}
-charges <- ay_meta %>%
-  select(year, data) %>%
-  unnest() %>%
-  # gather(chg1at0:chg9ay3, key = "variable", value = "charge") %>%
-  gather(chg1at0, chg1at1, chg1at2, chg1at3,
-         chg2at0, chg2at1, chg2at2, chg2at3,
-         chg3at0, chg3at1, chg3at2, chg3at3,
-         chg1af0, chg1af1, chg1af2, chg1af3,
-         chg2af0, chg2af1, chg2af2, chg2af3,
-         chg3af0, chg3af1, chg3af2, chg3af3,
-         chg4ay0, chg4ay1, chg4ay2, chg4ay3,
-         chg5ay0, chg5ay1, chg5ay2, chg5ay3,
-         chg6ay0, chg6ay1, chg6ay2, chg6ay3, key = "variable", value = "charge") %>%
-  separate(variable, c("chargex", "class", "index"), c(3, 6)) %>%
-  mutate(year_id = year + 1,
-         index = 3 - as.integer(index),
-         year = year_id - index,
-         charge_type_id = recode(class,
-                                 "1at" = 1,
-                                 "2at" = 1,
-                                 "3at" = 1,
-                                 "1af" = 2,
-                                 "2af" = 2,
-                                 "3af" = 2,
-                                 "4ay" = 3,
-                                 "5ay" = 4,
-                                 "6ay" = 5,
-                                 .default = 0),
-         charge_type = recode(class,
-                                 "1at" = "Tuition",
-                                 "2at" = "Tuition",
-                                 "3at" = "Tuition",
-                                 "1af" = "Fees",
-                                 "2af" = "Fees",
-                                 "3af" = "Fees",
-                                 "4ay" = "Books and supplies",
-                                 "5ay" = "On-campus room and board",
-                                 "6ay" = "On-campus other expenses",
-                                 .default = "Other"),
-         student_residency = recode(class,
-                                    "2at" = "In-state",
-                                    "3at" = "Out-of-state",
-                                    "2af" = "In-state",
-                                    "3af" = "Out-of-state",
-                                    .default = "In-district"),
-         charge = as.numeric(charge)) %>%
-  select(unitid, year_id, year, charge_type_id, charge_type, student_residency, charge)
+div100 <- function(x) {
+  x / 100
+}
 
-instate <- charges %>%
-  filter(charge_type_id > 2) %>%
-  mutate(student_residency = "In-state")
+aid <- sfa_meta %>%
+  select(year_id = year, data) %>%
+  unnest()
 
-outstate <- charges %>%
-  filter(charge_type_id > 2) %>%
-  mutate(student_residency = "Out-of-state")
-  
-charges <- charges %>%
-  bind_rows(., instate, outstate)
+# p <- aid %>%
+#   select(ends_with("p"))
+# 
+# pnames <- colnames(p)
 
-charges <- charges %>%
-  group_by(unitid, year) %>%
-  summarize(year_id = max(year_id)) %>%
-  ungroup() %>%
-  semi_join(charges, .) %>%
-  mutate(year_id = year) %>%
-  select(unitid, year_id, student_residency, charge_type, charge)
+# aid %>%
+#   select(-pnames) %>%
+#   bind_cols(., p)
 
-charges
+aid
+
 ```
 
 # Write to Database
 
 ```{r}
 system.time({
-  charges %>%
-    write_db("cdw", "ipeds_charges", add = FALSE)
+  aid %>%
+    write_db("cdw", "ipeds_student_aid", add = FALSE)
 })
 ```
 
