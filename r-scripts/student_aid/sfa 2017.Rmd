@@ -1,0 +1,213 @@
+---
+title: "Load IPEDS Student Aid by Academic Year"
+author: "Jason P. Casey"
+date: 2018-12-04
+output: html_notebook
+params:
+  year:
+    label: "Report Year:"
+    value: 2017
+---
+
+```{r setup}
+# knitr options
+knitr::opts_chunk$set(fig.width = 8,
+                      fig.asp = 0.618,
+                      echo = TRUE)
+knitr::knit_engines$set(python = reticulate::eng_python)
+
+# include user functions
+library(DBI)
+library(odbc)
+library(readxl)
+library(lubridate)
+library(kableExtra)
+library(tidyverse)
+
+# access data via net
+net_load <- function(file_url, file_name)
+{
+  #Download data file
+  temp <- tempfile()
+  
+  download.file(file_url,
+                temp)
+  
+  data <- read_csv(unz(temp, file_name),
+                        locale = locale(encoding = "latin1")) %>%
+    rename_all(tolower)
+  
+  unlink(temp)
+  rm(temp)
+  
+  return(data)
+}
+
+read_db <- function(db, query_string)
+{
+  # Open a connection
+  connection <- dbConnect(odbc::odbc(), db)
+  
+  response <- dbSendQuery(connection, query_string)
+  tbl <- dbFetch(response)
+  dbClearResult(response)
+  
+  # disconnect from the database
+  dbDisconnect(connection)
+  
+  return(as_tibble(tbl))
+}
+
+write_db <- function(frame, db, tab, add = TRUE) {
+  con <- dbConnect(odbc::odbc(), db)
+  
+  answer <- system.time({ dbWriteTable(con,
+                                       tab,
+                                       frame,
+                                       overwrite=!add,
+                                       append = add
+                                       ) })
+  
+  dbDisconnect(con)
+  
+  return(answer)
+}
+
+make_year_string <- function(year) {
+  str_c(
+    str_extract(as.character(year - 1), "\\d{2}$"),
+    str_extract(as.character(year), "\\d{2}$")
+  )
+}
+
+read_file <- function(spec1) {
+  recordset <- read_csv(spec1,
+                        locale = locale(encoding = "latin1")) %>%
+    rename_all(tolower)
+  
+  drop_fields <- recordset %>%
+    select(starts_with("x")) %>%
+             colnames(.)
+
+  # p <- recordset %>%
+  #   select(ends_with("p")) %>%
+  #   map(~ . / 100)
+  # 
+  # n <- recordset %>%
+  #   select(ends_with("n"))
+  # 
+  # a <- recordset %>%
+  #   select(ends_with("a"))
+  # 
+  recordset %>%
+    select(-drop_fields)
+}
+
+
+```
+
+# Read Data
+
+```{r}
+sfa_meta <- tibble(year = 2010:2017)
+
+for (i in seq_along(sfa_meta$year)) {
+  sfa_meta <-
+    sfa_meta %>%
+    mutate(characteristics_file = ifelse(year > 2016,
+                                         str_c("../../data/sfa/sfa", make_year_string(year), ".csv"),
+                                         str_c("../../data/sfa/sfa", make_year_string(year), "_rv.csv")),
+           data = map(characteristics_file, read_file)
+           )
+}
+
+sfa_meta
+
+```
+
+```{r}
+sfa_meta$data[[6]]
+```
+
+# Merge Data
+
+```{r}
+charges <- ay_meta %>%
+  select(year, data) %>%
+  unnest() %>%
+  # gather(chg1at0:chg9ay3, key = "variable", value = "charge") %>%
+  gather(chg1at0, chg1at1, chg1at2, chg1at3,
+         chg2at0, chg2at1, chg2at2, chg2at3,
+         chg3at0, chg3at1, chg3at2, chg3at3,
+         chg1af0, chg1af1, chg1af2, chg1af3,
+         chg2af0, chg2af1, chg2af2, chg2af3,
+         chg3af0, chg3af1, chg3af2, chg3af3,
+         chg4ay0, chg4ay1, chg4ay2, chg4ay3,
+         chg5ay0, chg5ay1, chg5ay2, chg5ay3,
+         chg6ay0, chg6ay1, chg6ay2, chg6ay3, key = "variable", value = "charge") %>%
+  separate(variable, c("chargex", "class", "index"), c(3, 6)) %>%
+  mutate(year_id = year + 1,
+         index = 3 - as.integer(index),
+         year = year_id - index,
+         charge_type_id = recode(class,
+                                 "1at" = 1,
+                                 "2at" = 1,
+                                 "3at" = 1,
+                                 "1af" = 2,
+                                 "2af" = 2,
+                                 "3af" = 2,
+                                 "4ay" = 3,
+                                 "5ay" = 4,
+                                 "6ay" = 5,
+                                 .default = 0),
+         charge_type = recode(class,
+                                 "1at" = "Tuition",
+                                 "2at" = "Tuition",
+                                 "3at" = "Tuition",
+                                 "1af" = "Fees",
+                                 "2af" = "Fees",
+                                 "3af" = "Fees",
+                                 "4ay" = "Books and supplies",
+                                 "5ay" = "On-campus room and board",
+                                 "6ay" = "On-campus other expenses",
+                                 .default = "Other"),
+         student_residency = recode(class,
+                                    "2at" = "In-state",
+                                    "3at" = "Out-of-state",
+                                    "2af" = "In-state",
+                                    "3af" = "Out-of-state",
+                                    .default = "In-district"),
+         charge = as.numeric(charge)) %>%
+  select(unitid, year_id, year, charge_type_id, charge_type, student_residency, charge)
+
+instate <- charges %>%
+  filter(charge_type_id > 2) %>%
+  mutate(student_residency = "In-state")
+
+outstate <- charges %>%
+  filter(charge_type_id > 2) %>%
+  mutate(student_residency = "Out-of-state")
+  
+charges <- charges %>%
+  bind_rows(., instate, outstate)
+
+charges <- charges %>%
+  group_by(unitid, year) %>%
+  summarize(year_id = max(year_id)) %>%
+  ungroup() %>%
+  semi_join(charges, .) %>%
+  mutate(year_id = year) %>%
+  select(unitid, year_id, student_residency, charge_type, charge)
+
+charges
+```
+
+# Write to Database
+
+```{r}
+system.time({
+  charges %>%
+    write_db("cdw", "ipeds_charges", add = FALSE)
+})
+```
+
