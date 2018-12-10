@@ -24,54 +24,8 @@ library(lubridate)
 library(kableExtra)
 library(tidyverse)
 
-# access data via net
-net_load <- function(file_url, file_name)
-{
-  #Download data file
-  temp <- tempfile()
-  
-  download.file(file_url,
-                temp)
-  
-  data <- read_csv(unz(temp, file_name),
-                        locale = locale(encoding = "latin1")) %>%
-    rename_all(tolower)
-  
-  unlink(temp)
-  rm(temp)
-  
-  return(data)
-}
-
-read_db <- function(db, query_string)
-{
-  # Open a connection
-  connection <- dbConnect(odbc::odbc(), db)
-  
-  response <- dbSendQuery(connection, query_string)
-  tbl <- dbFetch(response)
-  dbClearResult(response)
-  
-  # disconnect from the database
-  dbDisconnect(connection)
-  
-  return(as_tibble(tbl))
-}
-
-write_db <- function(frame, db, tab, add = TRUE) {
-  con <- dbConnect(odbc::odbc(), db)
-  
-  answer <- system.time({ dbWriteTable(con,
-                                       tab,
-                                       frame,
-                                       overwrite=!add,
-                                       append = add
-                                       ) })
-  
-  dbDisconnect(con)
-  
-  return(answer)
-}
+# include user functions
+source(file="../user-functions.R")
 
 read_file <- function(spec1) {
   recordset <- read_csv(spec1,
@@ -94,15 +48,13 @@ read_file <- function(spec1) {
 ```{r}
 ay_meta <- tibble(year = 2010:2017)
 
-for (i in seq_along(ay_meta$year)) {
-  ay_meta <-
-    ay_meta %>%
-    mutate(characteristics_file = ifelse(year > 2011,
-                                         str_c("../../data/ic/ic", year, "_ay.csv"),
-                                         str_c("../../data/ic/ic", year, "_ay_rv.csv")),
-           data = map(characteristics_file, read_file)
-           )
-}
+ay_meta <-
+  ay_meta %>%
+  mutate(characteristics_file = ifelse(year > 2011,
+                                       str_c("../../data/ic/ic", year, "_ay.csv"),
+                                       str_c("../../data/ic/ic", year, "_ay_rv.csv")),
+         data = map(characteristics_file, read_file)
+         )
 
 ay_meta
 
@@ -112,13 +64,16 @@ ay_meta
 ay_meta$data[[6]]
 ```
 
-# Merge Data
+# Merge Data Into Needed Tables
+
+## Detail Table
+
+This table contains the published charges by type: tuition, fees, books and supplies, room and board (on-campus), and other expenses.
 
 ```{r}
 charges <- ay_meta %>%
   select(year, data) %>%
   unnest() %>%
-  # gather(chg1at0:chg9ay3, key = "variable", value = "charge") %>%
   gather(chg1at0, chg1at1, chg1at2, chg1at3,
          chg2at0, chg2at1, chg2at2, chg2at3,
          chg3at0, chg3at1, chg3at2, chg3at3,
@@ -185,12 +140,69 @@ charges <- charges %>%
 charges
 ```
 
+## Average Rates Table
+
+This table contains the average tuition and fee amounts paid by typical undergraduate and graduate students.
+
+```{r}
+avg_ug <- ay_meta %>%
+  select(year, data) %>%
+  unnest() %>%
+  gather(tuition1, tuition2, tuition3, tuition5, tuition6, tuition7,
+         fee1, fee2, fee3, fee5, fee6, fee7,
+         hrchg1, hrchg2, hrchg3, hrchg5, hrchg6, hrchg7,
+         key = "variable", value = "charge") %>%
+  separate(variable, c("type", "class"), -1) %>%
+  mutate(year_id = year + 1,
+         charge_type = recode(type,
+                       "tuition" = "Average Tuition",
+                       "fee" = "Required Fees",
+                       "hrchg" = "Per Credit Hour Charge",
+                       .default = "Unknown"),
+         student_career = ifelse(as.integer(class) < 5, "Undergraduate", "Graduate"),
+         student_residency = recode(class,
+                                    "1" = "In-district",
+                                    "2" = "In-state",
+                                    "3" = "Out-of-state",
+                                    "5" = "In-district",
+                                    "6" = "In-state",
+                                    "7" = "Out-of-state",
+                                    .default = "Unknown"),
+         charge = as.numeric(charge)) %>%
+  select(unitid, year_id, charge_type, student_career, student_residency, charge) %>%
+  spread(charge_type, charge)
+
+avg_ug
+  
+```
+
+## All Tuition and Fees by Career Level and Program
+
+This table contains tuition and fee amounts for graduate programs, professional programs (e.g, Law), as well as undergraduate special programs.
+
+```{r}
+
+```
+
+
 # Write to Database
+
+## Detail Table
 
 ```{r}
 system.time({
   charges %>%
-    write_db("cdw", "ipeds_charges", add = FALSE)
+    write_db("cdw", "ipeds_charges")
 })
+```
+
+## Average Rates Table
+
+```{r}
+system.time({
+  avg_ug %>%
+    write_db("cdw", "ipeds_average_tuition")
+})
+
 ```
 

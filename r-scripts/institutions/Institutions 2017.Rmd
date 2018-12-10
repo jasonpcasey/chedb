@@ -24,73 +24,24 @@ library(lubridate)
 library(kableExtra)
 library(tidyverse)
 
-# access data via net
-net_load <- function(file_url, file_name)
-{
-  #Download data file
-  temp <- tempfile()
-  
-  download.file(file_url,
-                temp)
-  
-  data <- read_csv(unz(temp, file_name),
-                        locale = locale(encoding = "latin1")) %>%
-    rename_all(tolower)
-  
-  unlink(temp)
-  rm(temp)
-  
-  return(data)
-}
+# include user functions
+source(file="../user-functions.R")
 
-read_db <- function(db, query_string)
-{
-  # Open a connection
-  connection <- dbConnect(odbc::odbc(), db)
-  
-  response <- dbSendQuery(connection, query_string)
-  tbl <- dbFetch(response)
-  dbClearResult(response)
-  
-  # disconnect from the database
-  dbDisconnect(connection)
-  
-  return(as_tibble(tbl))
-}
+# Load tables
+big_10 <- c(145637, 147767, 151351, 153658, 163286, 170976, 171100,
+            174066, 181464, 186380, 204796, 214777, 240444, 243780)
 
-write_db <- function(frame, db, tab, add = TRUE) {
-  con <- dbConnect(odbc::odbc(), db)
-  
-  answer <- system.time({ dbWriteTable(con,
-                                       tab,
-                                       frame,
-                                       overwrite=!add,
-                                       append = add
-                                       ) })
-  
-  dbDisconnect(con)
-  
-  return(answer)
-}
+regents <- c(181464, 153658, 153603, 126614,
+             126818, 145637, 155317, 174066,
+             178396, 204796, 243780)
 
-read_aaude_data <- function(dbString, queryString)
-{
-  # Open a connection
-  connection <- dbConnect(odbc::odbc(),
-                          dbString, 
-                          UID=rstudioapi::showPrompt('User ID','Enter User ID'),
-                          PWD=rstudioapi::askForPassword("Database Password"))
-  
-  tbl <- dbReadTable(connection, tab) %>%
-    rename_all(tolower)
-  
-  # dbClearResult(response)
-  
-  # disconnect from the database
-  dbDisconnect(connection)
-  
-  return(as_tibble(tbl))
-}
+overlap <- c(100751, 122409, 126818, 137351,
+             145600, 153603, 153658, 155317,
+             155399, 159391, 171128, 178396,
+             181464, 196060, 207500, 209542,
+             228787, 232186, 236939, 445188)
+
+nu <- c(181464, 181428, 181747, 181394, 181215)
 
 mo_yr <- function(date_string) {
   my_month <- str_extract(date_string, "^\\d{2}")
@@ -119,17 +70,12 @@ fix_binary <- function(x) {
 
 
 
-
 # load dependencies
 states <- read_db("cdw", "SELECT * FROM states")
 institution_names <- read_excel("../../data/institution-names.xlsx")
-nsf_institutions <- read_db("cdw", "SELECT unitid, med_sch_flag FROM nsf_herd_institution_data") %>%
+nsf_institutions <- read_db("cdw", "SELECT unitid, medical_school FROM nsf_bridge") %>%
   group_by(unitid) %>%
-  summarize(med_sch_flag = max(med_sch_flag))
-
-regents <- c(181464, 153658, 153603, 126614,
-             126818, 145637, 155317, 174066,
-             178396, 204796, 243780)
+  summarize(medical_school = max(medical_school))
 
 read_files <- function(spec1, spec2) {
   details <- read_csv(spec2,
@@ -223,7 +169,7 @@ read_files <- function(spec1, spec2) {
            hbcu = fix_binary(as.integer(hbcu)),
            hospital = fix_binary(as.integer(hospital)),
            medical = fix_binary(as.integer(medical)),
-           nsf_medical_school = ifelse(as.integer(med_sch_flag)==1, 1, 0),
+           nsf_medical_school = ifelse(as.integer(medical_school)==1, 1, 0),
            tribal = fix_binary(as.integer(tribal)),
            postsecondary_institution = recode(as.integer(postsec),
                                               `1` = "Primarily postsecondary institution",
@@ -258,16 +204,14 @@ read_files <- function(spec1, spec2) {
 ```{r}
 ic_meta <- tibble(year = 2010:2017)
 
-for (i in seq_along(ic_meta$year)) {
-  ic_meta <-
-    ic_meta %>%
-    mutate(directory_file = str_c("../../data/ic/hd", year, ".csv"),
-           characteristics_file = ifelse(year == params$year,
-                                         str_c("../../data/ic/ic", year, ".csv"),
-                                         str_c("../../data/ic/ic", year, "_rv.csv")),
-           data = map2(directory_file, characteristics_file, read_files)
-           )
-}
+ic_meta <-
+  ic_meta %>%
+  mutate(directory_file = str_c("../../data/ic/hd", year, ".csv"),
+         characteristics_file = ifelse(year == params$year,
+                                       str_c("../../data/ic/ic", year, ".csv"),
+                                       str_c("../../data/ic/ic", year, "_rv.csv")),
+         data = map2(directory_file, characteristics_file, read_files)
+         )
 
 ic_meta
 
@@ -344,7 +288,7 @@ test
 #   institutions %>%
 #   count(fips, state_abbreviation, state, region) %>%
 #   select(-n) %>%
-#   write_db("cdw", "states", add = FALSE)
+#   write_db("cdw", "states")
 # })
 states
 ```
@@ -376,13 +320,13 @@ county %>%
 ```{r}
 system.time({
   cbsa %>%
-    write_db("cdw", "cbsa", add = FALSE)
+    write_db("cdw", "cbsa")
 
   csa %>%
-    write_db("cdw", "csa", add = FALSE)
+    write_db("cdw", "csa")
 
   county %>%
-    write_db("cdw", "counties", add = FALSE)
+    write_db("cdw", "counties")
   
 })
 ```
