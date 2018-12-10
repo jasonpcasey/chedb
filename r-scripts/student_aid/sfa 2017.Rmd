@@ -7,6 +7,9 @@ params:
   year:
     label: "Report Year:"
     value: 2017
+  read_raw:
+    label: "Read Raw"
+    value: "Y"
 ---
 
 ```{r setup}
@@ -24,54 +27,8 @@ library(lubridate)
 library(kableExtra)
 library(tidyverse)
 
-# access data via net
-net_load <- function(file_url, file_name)
-{
-  #Download data file
-  temp <- tempfile()
-  
-  download.file(file_url,
-                temp)
-  
-  data <- read_csv(unz(temp, file_name),
-                        locale = locale(encoding = "latin1")) %>%
-    rename_all(tolower)
-  
-  unlink(temp)
-  rm(temp)
-  
-  return(data)
-}
-
-read_db <- function(db, query_string)
-{
-  # Open a connection
-  connection <- dbConnect(odbc::odbc(), db)
-  
-  response <- dbSendQuery(connection, query_string)
-  tbl <- dbFetch(response)
-  dbClearResult(response)
-  
-  # disconnect from the database
-  dbDisconnect(connection)
-  
-  return(as_tibble(tbl))
-}
-
-write_db <- function(frame, db, tab, add = TRUE) {
-  con <- dbConnect(odbc::odbc(), db)
-  
-  answer <- system.time({ dbWriteTable(con,
-                                       tab,
-                                       frame,
-                                       overwrite=!add,
-                                       append = add
-                                       ) })
-  
-  dbDisconnect(con)
-  
-  return(answer)
-}
+# include user functions
+source(file="../user-functions.R")
 
 make_year_string <- function(year) {
   str_c(
@@ -80,85 +37,157 @@ make_year_string <- function(year) {
   )
 }
 
-read_file <- function(spec1) {
-  recordset <- read_csv(spec1,
-                        locale = locale(encoding = "latin1")) %>%
-    rename_all(tolower)
-  
+read_file <- function(url, file_name) {
+  recordset <- net_load_zip(url, file_name)
+
   drop_fields <- recordset %>%
     select(starts_with("x")) %>%
              colnames(.)
 
-  # p <- recordset %>%
-  #   select(ends_with("p")) %>%
-  #   map(~ . / 100)
-  # 
-  # n <- recordset %>%
-  #   select(ends_with("n"))
-  # 
-  # a <- recordset %>%
-  #   select(ends_with("a"))
-  # 
   recordset %>%
     select(-drop_fields)
 }
 
 
-```
-
-# Read Data
-
-```{r}
-sfa_meta <- tibble(year = 2010:2017)
-
-for (i in seq_along(sfa_meta$year)) {
-  sfa_meta <-
-    sfa_meta %>%
-    mutate(characteristics_file = ifelse(year > 2016,
-                                         str_c("../../data/sfa/sfa", make_year_string(year), ".csv"),
-                                         str_c("../../data/sfa/sfa", make_year_string(year), "_rv.csv")),
-           data = map(characteristics_file, read_file)
-           )
+if (params$read_raw == "Y") {
+  sfa_meta <- tibble(year = 2010:2017) %>%
+    mutate(url = str_c("https://nces.ed.gov/ipeds/datacenter/data/SFA", make_year_string(year), ".zip"),
+           data = map2(url, str_c("sfa", make_year_string(year), ".csv"), read_file))
+  
+  sfa <- sfa_meta %>%
+    select(year, data) %>%
+    mutate(year_id = year) %>%
+    unnest()
+  
+  rm(sfa_meta)
+  
+  sfa %>%
+    write_db("cdw", "sfa_raw")
 }
 
-sfa_meta
-
 ```
 
+# Read Raw Data
+
 ```{r}
-sfa_meta$data[[6]]
+if (params$read_raw == "N") {
+  system.time({
+    sfa <- read_db("cdw", "SELECT * FROM dbo.sfa_raw")
+    })
+}
 ```
 
 # Merge Data
+
+## Overall Aid
 
 ```{r}
 div100 <- function(x) {
   x / 100
 }
 
-aid <- sfa_meta %>%
-  select(year_id = year, data) %>%
-  unnest()
+aid <- sfa %>%
+  mutate(unitid = as.integer(unitid),
+         total_undergraduates = as.integer(scugrad),
+         full_time_freshman_cohort = as.integer(scugffn),
+         total_number = as.integer(gistn2),
+         total_on_campus = as.integer(giston2),
+         total_off_campus_with_family = as.integer(gistwf2),
+         total_off_campus_not_with_family = as.integer(gistof2),
+         total_living_arrangement_unknown = as.integer(gistun2),
+         cohort_paying_indistrict = as.integer(scfa11n),
+         cohort_paying_instate = as.integer(scfa12n),
+         cohort_paying_outstate = as.integer(scfa13n),
+         cohort_paying_unknown = as.integer(scfa14n),
+         awarded_grant_aid = as.integer(uagrntn),
+         total_grant_aid = as.integer(uagrntt),
+         awarded_federal_grants = as.integer(ofgrt_n),
+         total_federal_grants = as.integer(ofgrt_t),
+         awarded_state_local_grants = as.integer(sgrnt_n),
+         total_state_local_grants = as.integer(sgrnt_t),
+         awarded_institutional_grants = as.integer(igrnt_n),
+         total_institutional_grants = as.integer(igrnt_t),
+         awarded_federal_student_loans = as.integer(floan_n),
+         total_federal_student_loans = as.integer(floan_t),
+         awarded_other_student_loans = as.integer(oloan_n),
+         total_other_student_loans = as.integer(oloan_t)) %>%
+  select(unitid, year_id, total_undergraduates:total_other_student_loans)
 
-# p <- aid %>%
-#   select(ends_with("p"))
-# 
-# pnames <- colnames(p)
+```
 
-# aid %>%
-#   select(-pnames) %>%
-#   bind_cols(., p)
+## Aid by Income Band
 
-aid
+```{r}
+aid_income_band <- sfa %>%
+  select(unitid, year,
+         gis4n12, gis4g12, gis4t12, gis4a12,
+         gis4n22, gis4g22, gis4t22, gis4a22,
+         gis4n32, gis4g32, gis4t32, gis4a32,
+         gis4n42, gis4g42, gis4t42, gis4a42,
+         gis4n52, gis4g52, gis4t52, gis4a52,
 
+         gis4n11, gis4g11, gis4t11, gis4a11,
+         gis4n21, gis4g21, gis4t21, gis4a21,
+         gis4n31, gis4g31, gis4t31, gis4a31,
+         gis4n41, gis4g41, gis4t41, gis4a41,
+         gis4n51, gis4g51, gis4t51, gis4a51,
+
+         gis4n10, gis4g10, gis4t10, gis4a10,
+         gis4n20, gis4g20, gis4t20, gis4a20,
+         gis4n30, gis4g30, gis4t30, gis4a30,
+         gis4n40, gis4g40, gis4t40, gis4a40,
+         gis4n50, gis4g50, gis4t50, gis4a50,
+         
+         npis412, npis422, npis432, npis442, npis452,
+         npis411, npis421, npis431, npis441, npis451,
+         npis410, npis420, npis430, npis440, npis450) %>%
+  gather(gis4n12:npis450,
+         key = "variable", value = "amount") %>%
+  separate(variable, c("stub", "type", "income_band_id", "index"), c(-3, -2, -1)) %>%
+  select(unitid, year, stub, type, income_band_id, index, amount) %>%
+  mutate(index = 2 - as.integer(index),
+         year_id = year - index,
+         income_band = recode(income_band_id,
+                              "1" = "$0 - $30,000",
+                              "2" = "$30,001 - $48,000",
+                              "3" = "$48,001 - $75,000",
+                              "4" = "$75,001 - $110,000",
+                              "5" = "$110,001 or more"),
+         variable = recode(type,
+                           "a" = "average_amount",
+                           "n" = "count",
+                           "g" = "grant_recipients",
+                           "t" = "total_amount",
+                           "4" = "average_net_price"),
+         amount = as.numeric(amount)) %>%
+  filter(amount >= 0) %>%
+  select(unitid, year_id, year, income_band, variable, amount)
+
+aid_income_band <- aid_income_band %>%
+  group_by(unitid, year_id) %>%
+  summarize(year = max(year, na.rm = TRUE)) %>%
+  ungroup() %>%
+  select(unitid, year, year_id) %>%
+  inner_join(aid_income_band) %>%
+  spread(key = variable, value = amount) %>%
+  select(unitid, year_id, income_band, count, grant_recipients, total_amount, average_amount, average_net_price)
+
+aid_income_band %>%
+  filter(unitid == 181464)
 ```
 
 # Write to Database
 
+## Total Aid
+
 ```{r}
-system.time({
-  aid %>%
-    write_db("cdw", "ipeds_student_aid", add = FALSE)
-})
+aid %>%
+  write_db("cdw", "ipeds_student_aid")
 ```
 
+## Aid by Income Band
+
+```{r}
+aid_income_band %>%
+  write_db("cdw", "ipeds_student_aid_by_income")
+```
