@@ -7,6 +7,9 @@ params:
   year:
     label: "Report Year:"
     value: 2017
+  read_raw:
+    label: "Read Raw"
+    value: "Y"
 ---
 
 ```{r setup}
@@ -77,13 +80,19 @@ nsf_institutions <- read_db("cdw", "SELECT unitid, medical_school FROM nsf_bridg
   group_by(unitid) %>%
   summarize(medical_school = max(medical_school))
 
-read_files <- function(spec1, spec2) {
-  details <- read_csv(spec2,
-                      locale = locale(encoding = "latin1")) %>%
-    rename_all(tolower)
+read_files <- function(file1, file2) {
+  #https://nces.ed.gov/ipeds/datacenter/data/HD2017.zip
+  url <- "https://nces.ed.gov/ipeds/datacenter/data/"
   
-  recordset <- read_csv(spec1,
-                        locale = locale(encoding = "latin1")) %>%
+  spec1 <- str_c(url, file1, ".zip")
+  spec2 <- str_c(url, file2, ".zip")
+  
+  file1 <- str_c(file1, ".csv")
+  file2 <- str_c(file2, ".csv")
+  
+  details <- net_load_zip(spec2, file2)
+  
+  recordset <- net_load_zip(spec1, file1) %>%
     rename_all(tolower) %>%
     rename(institution_name = instnm,
            state_abbreviation = stabbr,
@@ -196,59 +205,49 @@ read_files <- function(spec1, spec2) {
            )
 }
 
+# ic_meta <- tibble(year = 2010:2017) %>%
+#   mutate(directory_file = str_c("../../data/ic/hd", year, ".csv"),
+#          characteristics_file = ifelse(year == params$year,
+#                                        str_c("../../data/ic/ic", year, ".csv"),
+#                                        str_c("../../data/ic/ic", year, "_rv.csv")),
+#          data = map2(directory_file, characteristics_file, read_files)
+#          )
+
+# str_c("hd", year, ".csv")
+# str_c("ic", year, ".csv")
+
+if (params$read_raw == "Y") {
+  ic_meta <- tibble(year = 2010:2017) %>%
+    mutate(data = map2(str_c("hd", year), str_c("ic", year), read_files))
+  
+institutions <- ic_meta %>%
+  mutate(year_id = year + 1) %>%
+  select(year_id, data) %>%
+  unnest()
+  
+  rm(ic_meta)
+  
+  institutions %>%
+    write_db("cdw", "ipeds_institutions")
+}
 
 ```
 
 # Read Data
 
 ```{r}
-ic_meta <- tibble(year = 2010:2017)
-
-ic_meta <-
-  ic_meta %>%
-  mutate(directory_file = str_c("../../data/ic/hd", year, ".csv"),
-         characteristics_file = ifelse(year == params$year,
-                                       str_c("../../data/ic/ic", year, ".csv"),
-                                       str_c("../../data/ic/ic", year, "_rv.csv")),
-         data = map2(directory_file, characteristics_file, read_files)
-         )
-
-ic_meta
+if (params$read_raw == "N") {
+  system.time({
+    institutions <- read_db("cdw", "SELECT * FROM dbo.ipeds_institutions")
+    })
+}
 
 ```
 
 # Merge Data
 
 ```{r}
-institutions <- ic_meta %>%
-  #rename("year_id" = "year") %>%
-  # mutate(year_id = year + 1) %>%
-  select(year, data) %>%
-  unnest() %>%
-  mutate(year_id = year + 1) %>%
-  select(year_id, everything(), -year)
-
 institutions
-```
-
-# Write to Database
-
-```{r}
-system.time({
-  con <- dbConnect(odbc::odbc(), "cdw")
-
-  institutions %>%
-    #select(-f1sysnam) %>%
-    dbWriteTable(con,
-                 "ipeds_institutions",
-                 .,
-                 overwrite = TRUE)
-
-  dbDisconnect(con)
-  
-  institutions %>%
-    write_csv("../../data/ic/insts.csv")
-  })
 ```
 
 # Find Unique Universe
@@ -271,26 +270,6 @@ unique %>%
   filter(!is.na(system_name)) %>%
   count(system_name) %>%
   arrange(desc(n), system_name)
-```
-
-# Test Net Load
-
-```{r}
-test <- net_load("https://nces.ed.gov/ipeds/datacenter/data/HD2017.zip", "hd2017.csv")
-
-test
-```
-
-# Make States Table
-
-```{r}
-# system.time({
-#   institutions %>%
-#   count(fips, state_abbreviation, state, region) %>%
-#   select(-n) %>%
-#   write_db("cdw", "states")
-# })
-states
 ```
 
 # Create Place Codes
