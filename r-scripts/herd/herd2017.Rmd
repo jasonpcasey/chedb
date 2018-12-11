@@ -1,15 +1,22 @@
 ---
-title: "R Notebook"
+title: "HERD 2017 Notebook"
 author: "Jason P. Casey"
 date: 2018-11-20
 output: html_notebook
-params:
-  read_raw:
-    label: "Read Raw"
-    value: "N"
 ---
 
-# Read Crosswalk
+# Setup
+
+Data setup:
+
+
+
+
+THIS _nsf_ipeds_bridge_ SCRIPT MUST BE RUN PRIOR TO RUNNING THIS SCRIPT
+
+
+
+
 
 ```{r setup}
 knitr::opts_chunk$set(fig.width = 8,
@@ -20,57 +27,9 @@ knitr::knit_engines$set(python = reticulate::eng_python)
 # include user functions
 source(file="../user-functions.R")
 
-xwalk <- read_db("cdw", "SELECT * FROM extract.NsfIpedsBridge")
-institutions <- read_db("cdw", "SELECT * FROM dbo.institutions")
-
-herd_meta <- tibble(year = 2010:2017)
-
-if (params$read_raw == "Y") {
-  herd_meta <-
-    herd_meta %>%  
-    mutate(path = str_c("https://www.nsf.gov/statistics/herd/data/csv/herd_", year, ".csv"),
-           # path = str_c("../../data/herd/herd_", year, ".xlsx"),
-           data = map(path, net_load)
-           )
-  
-  herd <- herd_meta %>%
-    select(data) %>%
-    unnest() %>%
-    mutate(inst_id = as.integer(inst_id)) %>%
-    inner_join(xwalk, by = c("inst_id" = "NsfSurveyId")) %>%
-    # filter(data > 0) %>%
-    mutate(year_id = as.integer(year),
-           unitid = as.integer(ipeds_unitid),
-           unitid = ifelse(is.na(unitid), as.integer(RollupId), as.integer(unitid)),
-           hbcu_flag = as.integer(hbcu_flag),
-           med_sch_flag = as.integer(as.logical(med_sch_flag)),
-           hhe_flag = as.integer(hhe_flag),
-           toi_code = as.integer(toi_code),
-           hdg_code = as.integer(hdg_code),
-           tod_code = as.integer(toc_code)) %>%
-    select(inst_id, ncses_inst_id, unitid, unitid_xwalk = Unitid, year_id, hbcu_flag:column, tod_code, data)
-
-  rm(herd_meta)
-  
-  herd %>%
-    write_db("cdw", "raw_herd")
-  
-  rm(herd)
-}
-
-# herd <- read_db("cdw", "SELECT * FROM [dbo].[raw_herd]")
-
-```
-
-
-# Read HERD Table into Memory
-
-```{r}
-if (params$read_raw == "N") {
-  system.time({
-    herd <- read_db("cdw", "SELECT * FROM [dbo].[raw_herd]")
-    })
-}
+system.time({
+  herd <- read_db("ched-staging", "SELECT * FROM dbo.raw_herd")
+})
 ```
 
 # Inspect Contents of HERD Table
@@ -81,21 +40,6 @@ herd %>%
 ```
 
 # Create Data Tables
-
-## Unique Institutions for Bridge Table
-
-```{r}
-unique <- herd %>%
-  group_by(unitid, inst_id, ncses_inst_id, unitid_xwalk, med_sch_flag) %>%
-  summarise(last_year_reported = max(year_id)) %>%
-  ungroup()
-
-mismatch <- unique %>%
-  anti_join(institutions)
-
-mismatch 
-
-```
 
 ## Institution Level Data Table
 
@@ -109,6 +53,7 @@ fix_null <- function(x) {
 inst_data <- herd %>%
   filter(questionnaire_no %in% c("01.a", "01.b", "01.c", "01.d", "01.e", "01.f", "01.g",
                                  "04")) %>%
+  rename(unitid = unitid_xwalk) %>%
   select(inst_id:inst_zip, questionnaire_no, data) %>%
   mutate(data = data * 1000) %>%
   spread(key = "questionnaire_no", value = "data") %>%
@@ -154,8 +99,9 @@ herd_details <- herd %>%
   mutate(funding_type = recode(as.integer(rownum),
                 `9`="Federal",
                 `11`="Non-federal")) %>%
-  select(inst_id, unitid, ncses_inst_id, year_id, funding_type, agency_id = column, academic_field_id, expenditure = data)  %>%
-  group_by(inst_id, unitid, ncses_inst_id, year_id, funding_type, agency_id, academic_field_id) %>%
+  rename(unitid = unitid_xwalk) %>%
+  select(inst_id, ncses_inst_id, unitid, year_id, funding_type, agency_id = column, academic_field_id, expenditure = data)  %>%
+  group_by(inst_id, ncses_inst_id, unitid, year_id, funding_type, agency_id, academic_field_id) %>%
   summarise(expenditure = sum(expenditure, na.rm = TRUE)) %>%
   ungroup()
 
@@ -164,26 +110,18 @@ herd_details
 
 # Write Records to Database
 
-## Bridge Table
-
-```{r}
-unique %>%
-  select(inst_id:inst_zip, last_reported_year_id = last_year_reported) %>%
-  write_db("cdw", "nsf_bridge")
-```
-
 ## Institution Data
 
 ```{r}
 inst_data %>%
-  write_db("cdw", "nsf_herd_institution_data")
+  write_db("ched-staging", "nsf_herd_institution_data")
 ```
 
 ## Detail Data
 
 ```{r}
 herd_details %>%
-  write_db("cdw", "nsf_herd_detail_data")
+  write_db("ched-staging", "nsf_herd_detail_data")
 ```
 
 
