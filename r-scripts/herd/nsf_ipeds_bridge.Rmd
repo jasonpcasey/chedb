@@ -1,0 +1,105 @@
+---
+title: "HERD Bridge Notebook"
+author: "Jason P. Casey"
+date: 2018-12-11
+output: html_notebook
+params:
+  read_raw:
+    label: "Read Raw"
+    value: "Y"
+  start_year:
+    label: "Start Year"
+    value: 2010
+  end_year:
+    label: "Ending Year"
+    value: 2017
+---
+
+# Setup
+
+
+
+THIS SCRIPT MUST BE RUN PRIOR TO RUNNING THE HERD SCRIPT
+
+
+
+Data setup:
+
+_read_raw_ parameter determines whether to do a data pull across the web.  This is costly, so only do so if new data need to be pulled.  Two options: Y or N.
+
+_start_year_ parameter determines the first year to be added.  Correspondingly,
+_end_year_ parameter sets the ending year.  Present values are based on the universe change in 2010 and the most recent year of available data.
+
+The code creates a table named _herd_ that contains raw responses for the sequence of years selected.
+
+```{r setup}
+knitr::opts_chunk$set(fig.width = 8,
+                      fig.asp = 0.618,
+                      echo = TRUE)
+knitr::knit_engines$set(python = reticulate::eng_python)
+
+# include user functions
+source(file="../user-functions.R")
+
+if (params$read_raw == "Y") {
+  xwalk <- read_db("ched-staging", "SELECT inst_id, unitid_xwalk FROM dbo.nsf_ipeds_bridge")
+  
+  herd_meta <- tibble(year = seq(params$start_year, params$end_year)) %>%  
+    mutate(path = str_c("https://www.nsf.gov/statistics/herd/data/csv/herd_", year, ".csv"),
+           data = map(path, net_load)
+           )
+  
+  herd <- herd_meta %>%
+    select(data) %>%
+    unnest() %>%
+    mutate(inst_id = as.integer(inst_id)) %>%
+    inner_join(xwalk, by = "inst_id") %>%
+    mutate(year_id = as.integer(year),
+           unitid = as.integer(ipeds_unitid),
+           unitid = ifelse(is.na(unitid), as.integer(RollupId), as.integer(unitid)),
+           unitid_xwalk = unitid,
+           hbcu_flag = as.integer(hbcu_flag),
+           med_sch_flag = as.integer(as.logical(med_sch_flag)),
+           hhe_flag = as.integer(hhe_flag),
+           toi_code = as.integer(toi_code),
+           hdg_code = as.integer(hdg_code),
+           tod_code = as.integer(toc_code)) %>%
+    select(inst_id, ncses_inst_id, unitid_xwalk, year_id, hbcu_flag:column, tod_code, data)
+
+  herd %>%
+    write_db("ched-staging", "raw_herd")
+
+    rm(herd_meta, herd, xwalk)
+}
+  
+system.time({
+  herd <- read_db("ched-staging", "SELECT * FROM dbo.raw_herd")
+  institutions <- read_db("ched-staging", "SELECT * FROM dbo.institutions")
+})
+
+```
+
+## Unique Institutions for Bridge Table
+
+```{r}
+unique <- herd %>%
+  group_by(unitid_xwalk, inst_id, ncses_inst_id, inst_name_long, inst_state_code, med_sch_flag) %>%
+  summarise(last_year_reported = max(year_id)) %>%
+  ungroup()
+
+mismatch <- unique %>%
+  anti_join(institutions, by = c("unitid_xwalk" = "unitid"))
+
+mismatch %>%
+  select(unitid_xwalk, inst_id, inst_name_long, inst_state_code, med_sch_flag)
+
+```
+
+# Write to Database
+
+```{r}
+unique %>%
+  select(unitid_xwalk:med_sch_flag, last_reported_year_id = last_year_reported) %>%
+  write_db("ched-staging", "nsf_ipeds_bridge")
+```
+
