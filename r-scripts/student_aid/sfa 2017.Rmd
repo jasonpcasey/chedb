@@ -4,13 +4,26 @@ author: "Jason P. Casey"
 date: 2018-12-04
 output: html_notebook
 params:
-  year:
-    label: "Report Year:"
-    value: 2017
   read_raw:
     label: "Read Raw"
-    value: "Y"
+    value: "N"
+  start_year:
+    label: "Start Year"
+    value: 2010
+  end_year:
+    label: "Ending Year"
+    value: 2017
 ---
+
+# Setup
+
+Data setup:
+
+_read_raw_ parameter determines whether to do a data pull across the web.  This is costly, so only do so if new data need to be pulled.  Two options: Y or N.
+
+_start_year_ parameter determines the first year to be added.  Correspondingly,
+_end_year_ parameter sets the ending year.  Present values are based on the universe change in 2010 and the most recent year of available data.
+
 
 ```{r setup}
 # knitr options
@@ -18,14 +31,6 @@ knitr::opts_chunk$set(fig.width = 8,
                       fig.asp = 0.618,
                       echo = TRUE)
 knitr::knit_engines$set(python = reticulate::eng_python)
-
-# include user functions
-library(DBI)
-library(odbc)
-library(readxl)
-library(lubridate)
-library(kableExtra)
-library(tidyverse)
 
 # include user functions
 source(file="../user-functions.R")
@@ -50,7 +55,7 @@ read_file <- function(url, file_name) {
 
 
 if (params$read_raw == "Y") {
-  sfa_meta <- tibble(year = 2010:2017) %>%
+  sfa_meta <- tibble(year = seq(params$start_year, params$end_year)) %>%
     mutate(url = str_c("https://nces.ed.gov/ipeds/datacenter/data/SFA", make_year_string(year), ".zip"),
            data = map2(url, str_c("sfa", make_year_string(year), ".csv"), read_file))
   
@@ -59,10 +64,10 @@ if (params$read_raw == "Y") {
     mutate(year_id = year) %>%
     unnest()
   
-  rm(sfa_meta)
-  
   sfa %>%
-    write_db("cdw", "sfa_raw")
+    write_db("ched-staging", "sfa_raw")
+  
+  rm(sfa_meta, sfa)
 }
 
 ```
@@ -70,11 +75,9 @@ if (params$read_raw == "Y") {
 # Read Raw Data
 
 ```{r}
-if (params$read_raw == "N") {
-  system.time({
-    sfa <- read_db("cdw", "SELECT * FROM dbo.sfa_raw")
-    })
-}
+system.time({
+  sfa <- read_db("ched-staging", "SELECT * FROM dbo.sfa_raw")
+  })
 ```
 
 # Merge Data
@@ -182,12 +185,12 @@ aid_income_band %>%
 
 ```{r}
 aid %>%
-  write_db("cdw", "ipeds_student_aid")
+  write_db("ched-staging", "ipeds_student_aid")
 ```
 
 ## Aid by Income Band
 
 ```{r}
 aid_income_band %>%
-  write_db("cdw", "ipeds_student_aid_by_income")
+  write_db("ched-staging", "ipeds_student_aid_by_income")
 ```

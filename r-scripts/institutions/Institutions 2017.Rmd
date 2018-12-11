@@ -4,13 +4,25 @@ author: "Jason P. Casey"
 date: 2018-11-21
 output: html_notebook
 params:
-  year:
-    label: "Report Year:"
-    value: 2017
   read_raw:
     label: "Read Raw"
     value: "Y"
+  start_year:
+    label: "Start Year"
+    value: 2010
+  end_year:
+    label: "Ending Year"
+    value: 2017
 ---
+
+# Setup
+
+Data setup:
+
+_read_raw_ parameter determines whether to do a data pull across the web.  This is costly, so only do so if new data need to be pulled.  Two options: Y or N.
+
+_start_year_ parameter determines the first year to be added.  Correspondingly,
+_end_year_ parameter sets the ending year.  Present values are based on the universe change in 2010 and the most recent year of available data.
 
 ```{r setup}
 # knitr options
@@ -18,14 +30,6 @@ knitr::opts_chunk$set(fig.width = 8,
                       fig.asp = 0.618,
                       echo = TRUE)
 knitr::knit_engines$set(python = reticulate::eng_python)
-
-# include user functions
-library(DBI)
-library(odbc)
-library(readxl)
-library(lubridate)
-library(kableExtra)
-library(tidyverse)
 
 # include user functions
 source(file="../user-functions.R")
@@ -52,10 +56,6 @@ mo_yr <- function(date_string) {
   
   my_date <- lubridate::make_date(my_year, my_month, 1)
   
-  #day(my_date) <- days_in_month(my_date)
-  
-  #my_day <- str_pad(days_in_month(my_date), 2, pad = "0")
-  
   answer <- str_c(my_month,
         "/",
         str_pad(days_in_month(my_date), 2, pad = "0"),
@@ -65,6 +65,8 @@ mo_yr <- function(date_string) {
   return(answer)
 }
 
+
+
 fix_binary <- function(x) {
   recode(x,
          `1` = 1,
@@ -72,13 +74,6 @@ fix_binary <- function(x) {
 }
 
 
-
-# load dependencies
-states <- read_db("cdw", "SELECT * FROM states")
-institution_names <- read_excel("../../data/institution-names.xlsx")
-nsf_institutions <- read_db("cdw", "SELECT unitid, medical_school FROM nsf_bridge") %>%
-  group_by(unitid) %>%
-  summarize(medical_school = max(medical_school))
 
 read_files <- function(file1, file2) {
   #https://nces.ed.gov/ipeds/datacenter/data/HD2017.zip
@@ -102,6 +97,7 @@ read_files <- function(file1, file2) {
     left_join(nsf_institutions, by = "unitid") %>%
     mutate(unitid = as.integer(unitid),
            regents_peer = ifelse(unitid %in% regents, 1, 0),
+           is_un = ifelse(unitid %in% nu, 1, 0),
            zip = as.character(zip),
            fips = as.integer(fips),
            service_academy = ifelse(as.integer(obereg) == 0, 1, 0),
@@ -197,7 +193,7 @@ read_files <- function(file1, file2) {
            web_address, fips, county_fips, service_academy,
            institution_level, control, highest_level_offering, highest_degree_offering,
            undergraduate_offering, graduate_offering, degree_granting, 
-           regents_peer, locale, parent_id, year_closed, close_date,
+           regents_peer, is_un, locale, parent_id, year_closed, close_date,
            cbsa_id, cbsa_type, csa_id, longitude, latitude,
            system_member, system_name, open_to_public, landgrant,
            hbcu, hospital, medical, nsf_medical_school, tribal, rotc,
@@ -205,30 +201,26 @@ read_files <- function(file1, file2) {
            )
 }
 
-# ic_meta <- tibble(year = 2010:2017) %>%
-#   mutate(directory_file = str_c("../../data/ic/hd", year, ".csv"),
-#          characteristics_file = ifelse(year == params$year,
-#                                        str_c("../../data/ic/ic", year, ".csv"),
-#                                        str_c("../../data/ic/ic", year, "_rv.csv")),
-#          data = map2(directory_file, characteristics_file, read_files)
-#          )
-
-# str_c("hd", year, ".csv")
-# str_c("ic", year, ".csv")
-
 if (params$read_raw == "Y") {
-  ic_meta <- tibble(year = 2010:2017) %>%
+  # load dependencies
+  states <- read_db("ched-staging", "SELECT * FROM states")
+  institution_names <- read_excel("../../data/institution-names.xlsx")
+  nsf_institutions <- read_db("ched-staging", "SELECT unitid_xwalk AS unitid, med_sch_flag AS medical_school FROM nsf_ipeds_bridge") %>%
+    group_by(unitid) %>%
+    summarize(medical_school = max(medical_school))
+
+  ic_meta <- tibble(year = seq(params$start_year, params$end_year)) %>%
     mutate(data = map2(str_c("hd", year), str_c("ic", year), read_files))
   
-institutions <- ic_meta %>%
-  mutate(year_id = year + 1) %>%
-  select(year_id, data) %>%
-  unnest()
+  institutions <- ic_meta %>%
+    mutate(year_id = year + 1) %>%
+    select(year_id, data) %>%
+    unnest()
   
-  rm(ic_meta)
+  rm(ic_meta, states, institution_names, nsf_institutions)
   
   institutions %>%
-    write_db("cdw", "ipeds_institutions")
+    write_db("ched-staging", "ipeds_institutions")
 }
 
 ```
@@ -238,7 +230,7 @@ institutions <- ic_meta %>%
 ```{r}
 if (params$read_raw == "N") {
   system.time({
-    institutions <- read_db("cdw", "SELECT * FROM dbo.ipeds_institutions")
+    institutions <- read_db("ched-staging", "SELECT * FROM dbo.ipeds_institutions")
     })
 }
 
@@ -247,89 +239,7 @@ if (params$read_raw == "N") {
 # Merge Data
 
 ```{r}
-institutions
-```
-
-# Find Unique Universe
-
-```{r}
-unique <- institutions %>%
-  group_by(unitid) %>%
-  summarize(year_id = max(year_id)) %>%
-  ungroup() %>%
-  inner_join(institutions) # %>%
-  # select(-YearId)
-
-table(unique$degree_granting)
-```
-
-# Find Systems
-
-```{r}
-unique %>%
-  filter(!is.na(system_name)) %>%
-  count(system_name) %>%
-  arrange(desc(n), system_name)
-```
-
-# Create Place Codes
-
-```{r}
-cbsa <- read_excel("../../data/place_codes.xlsx",
-                   sheet = "CBSA")
-
-csa <- read_excel("../../data/place_codes.xlsx",
-                   sheet = "CSA")
-
-county <- read_excel("../../data/place_codes.xlsx",
-                   sheet = "COUNTY") %>%
-  count(county_fips, county_name, state) %>%
-  select(-n)
-
-county
-```
-
-```{r}
-county %>%
-  count(county_fips) %>%
-  filter(n > 1) %>%
-  inner_join(county)
-```
-
-```{r}
-system.time({
-  cbsa %>%
-    write_db("cdw", "cbsa")
-
-  csa %>%
-    write_db("cdw", "csa")
-
-  county %>%
-    write_db("cdw", "counties")
-  
-})
-```
-
-# Read AAU Membership
-
-```{r}
-aaude_inst <- grabData('aaude', "SELECT * FROM WAREUSER.INSTITUTION") %>%
-  select(-warehouse_load_date)
-
-aaude_inst
-```
-
-# Write AAU Membership Table
-
-```{r}
-system.time({
-  institutions %>%
-    filter(is_aau_institution == "Y") %>%
-    select(unitid = unit_id,
-           inst_name) %>%
-    write_db("cdw", "aau_membership", add = FALSE)
-})
-
-
+institutions %>%
+  filter(is_un == 1)
 ```
 

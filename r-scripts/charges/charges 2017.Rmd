@@ -4,10 +4,25 @@ author: "Jason P. Casey"
 date: 2018-12-03
 output: html_notebook
 params:
-  year:
-    label: "Report Year:"
+  read_raw:
+    label: "Read Raw"
+    value: "Y"
+  start_year:
+    label: "Start Year"
+    value: 2010
+  end_year:
+    label: "Ending Year"
     value: 2017
 ---
+
+# Setup
+
+Data setup:
+
+_read_raw_ parameter determines whether to do a data pull across the web.  This is costly, so only do so if new data need to be pulled.  Two options: Y or N.
+
+_start_year_ parameter determines the first year to be added.  Correspondingly,
+_end_year_ parameter sets the ending year.  Present values are based on the universe change in 2010 and the most recent year of available data.
 
 ```{r setup}
 # knitr options
@@ -17,20 +32,10 @@ knitr::opts_chunk$set(fig.width = 8,
 knitr::knit_engines$set(python = reticulate::eng_python)
 
 # include user functions
-library(DBI)
-library(odbc)
-library(readxl)
-library(lubridate)
-library(kableExtra)
-library(tidyverse)
-
-# include user functions
 source(file="../user-functions.R")
 
-read_file <- function(spec1) {
-  recordset <- read_csv(spec1,
-                        locale = locale(encoding = "latin1")) %>%
-    rename_all(tolower)
+read_file <- function(url, file_name) {
+  recordset <- net_load_zip(url, file_name)
   
   drop_fields <- recordset %>%
     select(starts_with("x"), chg1tgtd, chg1fgtd, chg2tgtd, chg2fgtd, chg3tgtd, chg3fgtd) %>%
@@ -40,28 +45,29 @@ read_file <- function(spec1) {
     select(-drop_fields)
 }
 
+if (params$read_raw == "Y") {
+  ay_meta <- tibble(year = seq(params$start_year, params$end_year)) %>%
+    mutate(url = str_c("https://nces.ed.gov/ipeds/datacenter/data/ic", year, "_ay.zip"),
+           data = map2(url, str_c("ic", year, "_ay.csv"), read_file))
+  
+  charges_raw <- ay_meta %>%
+  select(year, data) %>%
+  unnest()
+  
+  charges_raw %>%
+    write_db("ched-staging", "charges_raw")
+
+  rm(ay_meta, charges_raw)
+}
 
 ```
 
 # Read Data
 
 ```{r}
-ay_meta <- tibble(year = 2010:2017)
-
-ay_meta <-
-  ay_meta %>%
-  mutate(characteristics_file = ifelse(year > 2011,
-                                       str_c("../../data/ic/ic", year, "_ay.csv"),
-                                       str_c("../../data/ic/ic", year, "_ay_rv.csv")),
-         data = map(characteristics_file, read_file)
-         )
-
-ay_meta
-
-```
-
-```{r}
-ay_meta$data[[6]]
+system.time({
+  charges_raw <- read_db("ched-staging", "SELECT * FROM dbo.charges_raw")
+  })
 ```
 
 # Merge Data Into Needed Tables
@@ -71,9 +77,7 @@ ay_meta$data[[6]]
 This table contains the published charges by type: tuition, fees, books and supplies, room and board (on-campus), and other expenses.
 
 ```{r}
-charges <- ay_meta %>%
-  select(year, data) %>%
-  unnest() %>%
+charges <- charges_raw %>%
   gather(chg1at0, chg1at1, chg1at2, chg1at3,
          chg2at0, chg2at1, chg2at2, chg2at3,
          chg3at0, chg3at1, chg3at2, chg3at3,
@@ -145,9 +149,7 @@ charges
 This table contains the average tuition and fee amounts paid by typical undergraduate and graduate students.
 
 ```{r}
-avg_ug <- ay_meta %>%
-  select(year, data) %>%
-  unnest() %>%
+avg_charges <- charges_raw %>%
   gather(tuition1, tuition2, tuition3, tuition5, tuition6, tuition7,
          fee1, fee2, fee3, fee5, fee6, fee7,
          hrchg1, hrchg2, hrchg3, hrchg5, hrchg6, hrchg7,
@@ -172,7 +174,7 @@ avg_ug <- ay_meta %>%
   select(unitid, year_id, charge_type, student_career, student_residency, charge) %>%
   spread(charge_type, charge)
 
-avg_ug
+avg_charges
   
 ```
 
@@ -190,19 +192,14 @@ This table contains tuition and fee amounts for graduate programs, professional 
 ## Detail Table
 
 ```{r}
-system.time({
-  charges %>%
-    write_db("cdw", "ipeds_charges")
-})
+charges %>%
+  write_db("ched-staging", "ipeds_charges")
 ```
 
 ## Average Rates Table
 
 ```{r}
-system.time({
-  avg_ug %>%
-    write_db("cdw", "ipeds_average_tuition")
-})
-
+avg_charges %>%
+  write_db("ched-staging", "ipeds_average_tuition")
 ```
 
