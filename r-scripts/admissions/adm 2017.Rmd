@@ -132,18 +132,10 @@ adm <- adm_raw %>%
          ) %>%
   select(unitid,
          year_id,
-         applcnu,
-         applcnm,
-         applcnw,
-         admssnu,
-         admssnm,
-         admssnw,
-         enrlftu,
-         enrlftm,
-         enrlftw,
-         enrlptu,
-         enrlptm,
-         enrlptw) %>%
+         applcnu, applcnm, applcnw,
+         admssnu, admssnm, admssnw,
+         enrlftu, enrlftm, enrlftw,
+         enrlptu, enrlptm, enrlptw) %>%
   gather(field,
          headcount,
          applcnu:enrlptw) %>%
