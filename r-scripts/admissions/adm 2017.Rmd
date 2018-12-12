@@ -35,7 +35,8 @@ knitr::knit_engines$set(python = reticulate::eng_python)
 source(file="../user-functions.R")
 
 fix_column <- function(x) {
-  x <- ifelse(is.na(x), 0, as.integer(x))
+  x <- ifelse(x < 0, 0, x)
+  x <- ifelse(is.na(x), 0, x)
 }
 
 read_file <- function(url, file_name) {
@@ -44,38 +45,23 @@ read_file <- function(url, file_name) {
   #  admcon1, admcon2, admcon3, admcon4, admcon5, admcon6, admcon7, admcon8, admcon9,
   
   recordset %>%
+    mutate(satwr25 = ifelse("satwr25" %in% colnames(.), satwr25, NA),
+           satwr75 = ifelse("satwr75" %in% colnames(.), satwr75, NA),
+           actwr25 = ifelse("actwr25" %in% colnames(.), actwr25, NA),
+           actwr75 = ifelse("actwr75" %in% colnames(.), actwr75, NA)) %>%
     select(unitid,
            applcn, applcnm, applcnw,
            admssn, admssnm, admssnw,
            enrlt, enrlm, enrlw, enrlft,
            enrlftm, enrlftw, enrlpt,
-           enrlptm, enrlptw) %>%
-    map(~ fix_column(.)) %>%
+           enrlptm, enrlptw, satnum,
+           satpct, actnum, actpct, satvr25,
+           satvr75, satmt25, satmt75, satwr25,
+           satwr75, actcm25, actcm75, acten25,
+           acten75, actmt25, actmt75, actwr25,
+           actwr75) %>%
+    map(~ as.integer(.)) %>%
     as_tibble()
-    # mutate(admcon1 = ifelse(is.na(admcon1), 1, as.integer(admcon1)),
-    #        admcon2 = ifelse(is.na(admcon2), 1, as.integer(admcon2)),
-    #        admcon3 = ifelse(is.na(admcon3), 1, as.integer(admcon3)),
-    #        admcon4 = ifelse(is.na(admcon4), 1, as.integer(admcon4)),
-    #        admcon5 = ifelse(is.na(admcon5), 1, as.integer(admcon5)),
-    #        admcon6 = ifelse(is.na(admcon6), 1, as.integer(admcon6)),
-    #        admcon7 = ifelse(is.na(admcon7), 1, as.integer(admcon7)),
-    #        admcon8 = ifelse(is.na(admcon8), 1, as.integer(admcon8)),
-    #        admcon9 = ifelse(is.na(admcon9), 1, as.integer(admcon9)),
-    #        applcn = ifelse(is.na(applcn), 0, as.integer(applcn)),
-    #        applcnm = ifelse(is.na(applcnm), 0, as.integer(applcnm)),
-    #        applcnw = ifelse(is.na(applcnw), 0, as.integer(applcnw)),
-    #        admssn = ifelse(is.na(admssn), 0, as.integer(admssn)),
-    #        admssnm = ifelse(is.na(admssnm), 0, as.integer(admssnm)),
-    #        admssnw = ifelse(is.na(admssnw), 0, as.integer(admssnw)),
-    #        enrlt = ifelse(is.na(enrlt), 0, as.integer(enrlt)),
-    #        enrlm = ifelse(is.na(enrlm), 0, as.integer(enrlm)),
-    #        enrlw = ifelse(is.na(enrlw), 0, as.integer(enrlw)),
-    #        enrlft = ifelse(is.na(enrlft), 0, as.integer(enrlft)),
-    #        enrlftm = ifelse(is.na(enrlftm), 0, as.integer(enrlftm)),
-    #        enrlftw = ifelse(is.na(enrlftw), 0, as.integer(enrlftw)),
-    #        enrlpt = ifelse(is.na(enrlpt), 0, as.integer(enrlpt)),
-    #        enrlptm = ifelse(is.na(enrlptm), 0, as.integer(enrlptm)),
-    #        enrlptw = ifelse(is.na(enrlptw), 0, as.integer(enrlptw)))
 }
 
 if (params$read_raw == "Y") {
@@ -109,14 +95,22 @@ system.time({
   })
 ```
 
-# Merge Data Into Needed Tables
+# Make Data Tables
 
-## Detail Table
+## Admissions Table
 
 
 
 ```{r}
 adm <- adm_raw %>%
+  select(unitid, year_id,
+         applcn, applcnm, applcnw,
+         admssn, admssnm, admssnw,
+         enrlt, enrlm, enrlw, enrlft,
+         enrlftm, enrlftw, enrlpt,
+         enrlptm, enrlptw) %>%
+  map(~ fix_column(.)) %>%
+  as_tibble(.) %>%
   mutate(applcn = ifelse(applcn==0, applcnm + applcnw, applcn),
          admssn = ifelse(admssn==0, admssnm + admssnw, admssn),
          enrlm = ifelse(enrlm==0, enrlftm + enrlptm, enrlm),
@@ -129,16 +123,10 @@ adm <- adm_raw %>%
          enrltu = enrlt - (enrlm + enrlw),
          enrlftu = enrlft - (enrlftm + enrlftw),
          enrlptu = enrlpt - (enrlptm + enrlptw)
-         ) %>%
-  select(unitid,
-         year_id,
-         applcnu, applcnm, applcnw,
-         admssnu, admssnm, admssnw,
-         enrlftu, enrlftm, enrlftw,
-         enrlptu, enrlptm, enrlptw) %>%
+         )  %>%
   gather(field,
          headcount,
-         applcnu:enrlptw) %>%
+         applcn:enrlptu) %>%
   mutate(sex = recode(field,
                       "applcnm" = "Men",
                       "admssnm" = "Men",
@@ -148,7 +136,7 @@ adm <- adm_raw %>%
                       "admssnw" = "Women",
                       "enrlftw" = "Women",
                       "enrlptw" = "Women",
-                      .default = 'Unknown'),
+                      .default = "Unknown"),
          population = recode(field,
                              "admssnu" = "admissions",
                              "admssnm" = "admissions",
@@ -175,16 +163,110 @@ adm <- adm_raw %>%
 
   adm %>%
     filter(unitid == 181464,
-         year_id == 2018)
+           year_id == 2018)
+
+```
+
+## Test Scores Table
+
+```{r}
+scores <- adm_raw %>%
+    select(unitid, year_id, satnum, satpct,
+           actnum, actpct, satvr25, satvr75,
+           satmt25, satmt75, satwr25, satwr75,
+           actcm25, actcm75, acten25, acten75,
+           actmt25, actmt75, actwr25, actwr75) %>%
+  mutate(actpct = actpct / 100,
+         satpct = satpct / 100) %>%
+  gather(satnum:actwr75, key = "variable", value = "val") %>%
+  mutate(test_type = recode(variable,
+                         "satnum" = "SAT",
+                         "satpct" = "SAT",
+                         "satvr25" = "SAT",
+                         "satvr75" = "SAT",
+                         "satmt25" = "SAT",
+                         "satmt75" = "SAT",
+                         "satwr25" = "SAT",
+                         "satwr75" = "SAT",
+                         "actnum" = "ACT",
+                         "actpct" = "ACT",
+                         "actcm25" = "ACT",
+                         "actcm75" = "ACT",
+                         "acten25" = "ACT",
+                         "acten75" = "ACT",
+                         "actmt25" = "ACT",
+                         "actmt75" = "ACT",
+                         "actwr25" = "ACT",
+                         "actwr75" = "ACT"),
+         subject = recode(variable,
+                            "satnum" = "Composite",
+                            "satpct" = "Composite",
+                            "actnum" = "Composite",
+                            "actpct" = "Composite",
+                            "actcm25" = "Composite",
+                            "actcm75" = "Composite",
+                            "satmt25" = "Math",
+                            "satmt75" = "Math",
+                            "actmt25" = "Math",
+                            "actmt75" = "Math",
+                            "satvr25" = "Verbal",
+                            "satvr75" = "Verbal",
+                            "satwr25" = "Writing",
+                            "satwr75" = "Writing",
+                            "actwr25" = "Writing",
+                            "actwr75" = "Writing",
+                            "acten25" = "English",
+                            "acten75" = "English"),
+         count = ifelse(variable %in% c("satnum",
+                                        "actnum"), val, 0),
+         percentage = ifelse(variable %in% c("satpct",
+                                             "actpct"), val, 0),
+         percentile_25 = ifelse(variable %in% c("satvr25",
+                                               "satmt25",
+                                               "satwr25",
+                                               "actcm25",
+                                               "acten25",
+                                               "actmt25",
+                                               "actwr25"), val, 0),
+         percentile_75 = ifelse(variable %in% c("satvr75",
+                                               "satmt75",
+                                               "satwr75",
+                                               "actcm75",
+                                               "acten75",
+                                               "actmt75",
+                                               "actwr75"), val, 0)) %>%
+  group_by(unitid, year_id, test_type, subject) %>%
+  summarise(count = sum(count, na.rm = TRUE),
+         percentage = sum(percentage, na.rm = TRUE),
+         percentile_25 = sum(percentile_25, na.rm = TRUE),
+         percentile_75 = sum(percentile_75, na.rm = TRUE)) %>%
+  ungroup() %>%
+  filter(count > 0 | percentage > 0 | percentile_25 > 0 | percentile_75 > 0) %>%
+  mutate(count = ifelse(count == 0, NA, count),
+         percentage = ifelse(percentage == 0, NA, percentage),
+         percentile_25 = ifelse(percentile_25 == 0, NA, percentile_25),
+         percentile_75 = ifelse(percentile_75 == 0, NA, percentile_75))
+
+
+  scores %>%
+    filter(unitid == 181464,
+           year_id == 2018)
 
 ```
 
 # Write to Database
 
-## Detail Table
+## Admissions Table
 
 ```{r}
 adm %>%
   write_db("ched-staging", "ipeds_admissions")
+```
+
+## Test Scores Tables
+
+```{r}
+scores %>%
+  write_db("ched-staging", "ipeds_test_scores")
 ```
 
