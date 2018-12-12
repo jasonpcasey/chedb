@@ -76,7 +76,8 @@ if (params$read_raw == "Y") {
 
 ```{r}
 system.time({
-  sfa <- read_db("ched-staging", "SELECT * FROM dbo.sfa_raw")
+  sfa <- read_db("ched-staging", "SELECT * FROM dbo.sfa_raw") %>%
+    mutate(unitid = as.integer(unitid))
   })
 ```
 

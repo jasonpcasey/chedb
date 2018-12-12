@@ -6,7 +6,7 @@ output: html_notebook
 params:
   read_raw:
     label: "Read Raw"
-    value: "Y"
+    value: "N"
   start_year:
     label: "Start Year"
     value: 2010
@@ -88,7 +88,8 @@ charges <- charges_raw %>%
          chg5ay0, chg5ay1, chg5ay2, chg5ay3,
          chg6ay0, chg6ay1, chg6ay2, chg6ay3, key = "variable", value = "charge") %>%
   separate(variable, c("chargex", "class", "index"), c(3, 6)) %>%
-  mutate(year_id = year + 1,
+  mutate(unitid = as.integer(unitid),
+         year_id = year + 1,
          index = 3 - as.integer(index),
          year = year_id - index,
          charge_type_id = recode(class,
@@ -155,7 +156,8 @@ avg_charges <- charges_raw %>%
          hrchg1, hrchg2, hrchg3, hrchg5, hrchg6, hrchg7,
          key = "variable", value = "charge") %>%
   separate(variable, c("type", "class"), -1) %>%
-  mutate(year_id = year + 1,
+  mutate(unitid = as.integer(unitid),
+         year_id = year + 1,
          charge_type = recode(type,
                        "tuition" = "Average Tuition",
                        "fee" = "Required Fees",
