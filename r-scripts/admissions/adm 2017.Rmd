@@ -1,0 +1,198 @@
+---
+title: "Load IPEDS Admissions"
+author: "Jason P. Casey"
+date: 2018-12-03
+output: html_notebook
+params:
+  read_raw:
+    label: "Read Raw"
+    value: "Y"
+  start_year:
+    label: "Start Year"
+    value: 2007
+  end_year:
+    label: "Ending Year"
+    value: 2017
+---
+
+# Setup
+
+Data setup:
+
+_read_raw_ parameter determines whether to do a data pull across the web.  This is costly, so only do so if new data need to be pulled.  Two options: Y or N.
+
+_start_year_ parameter determines the first year to be added.  Correspondingly,
+_end_year_ parameter sets the ending year.  Present values are based on the universe change in 2010 and the most recent year of available data.
+
+```{r setup}
+# knitr options
+knitr::opts_chunk$set(fig.width = 8,
+                      fig.asp = 0.618,
+                      echo = TRUE)
+knitr::knit_engines$set(python = reticulate::eng_python)
+
+# include user functions
+source(file="../user-functions.R")
+
+fix_column <- function(x) {
+  x <- ifelse(is.na(x), 0, as.integer(x))
+}
+
+read_file <- function(url, file_name) {
+  recordset <- net_load_zip(url, file_name)
+  
+  #  admcon1, admcon2, admcon3, admcon4, admcon5, admcon6, admcon7, admcon8, admcon9,
+  
+  recordset %>%
+    select(unitid,
+           applcn, applcnm, applcnw,
+           admssn, admssnm, admssnw,
+           enrlt, enrlm, enrlw, enrlft,
+           enrlftm, enrlftw, enrlpt,
+           enrlptm, enrlptw) %>%
+    map(~ fix_column(.)) %>%
+    as_tibble()
+    # mutate(admcon1 = ifelse(is.na(admcon1), 1, as.integer(admcon1)),
+    #        admcon2 = ifelse(is.na(admcon2), 1, as.integer(admcon2)),
+    #        admcon3 = ifelse(is.na(admcon3), 1, as.integer(admcon3)),
+    #        admcon4 = ifelse(is.na(admcon4), 1, as.integer(admcon4)),
+    #        admcon5 = ifelse(is.na(admcon5), 1, as.integer(admcon5)),
+    #        admcon6 = ifelse(is.na(admcon6), 1, as.integer(admcon6)),
+    #        admcon7 = ifelse(is.na(admcon7), 1, as.integer(admcon7)),
+    #        admcon8 = ifelse(is.na(admcon8), 1, as.integer(admcon8)),
+    #        admcon9 = ifelse(is.na(admcon9), 1, as.integer(admcon9)),
+    #        applcn = ifelse(is.na(applcn), 0, as.integer(applcn)),
+    #        applcnm = ifelse(is.na(applcnm), 0, as.integer(applcnm)),
+    #        applcnw = ifelse(is.na(applcnw), 0, as.integer(applcnw)),
+    #        admssn = ifelse(is.na(admssn), 0, as.integer(admssn)),
+    #        admssnm = ifelse(is.na(admssnm), 0, as.integer(admssnm)),
+    #        admssnw = ifelse(is.na(admssnw), 0, as.integer(admssnw)),
+    #        enrlt = ifelse(is.na(enrlt), 0, as.integer(enrlt)),
+    #        enrlm = ifelse(is.na(enrlm), 0, as.integer(enrlm)),
+    #        enrlw = ifelse(is.na(enrlw), 0, as.integer(enrlw)),
+    #        enrlft = ifelse(is.na(enrlft), 0, as.integer(enrlft)),
+    #        enrlftm = ifelse(is.na(enrlftm), 0, as.integer(enrlftm)),
+    #        enrlftw = ifelse(is.na(enrlftw), 0, as.integer(enrlftw)),
+    #        enrlpt = ifelse(is.na(enrlpt), 0, as.integer(enrlpt)),
+    #        enrlptm = ifelse(is.na(enrlptm), 0, as.integer(enrlptm)),
+    #        enrlptw = ifelse(is.na(enrlptw), 0, as.integer(enrlptw)))
+}
+
+if (params$read_raw == "Y") {
+  adm_meta <- tibble(year = seq(params$start_year, params$end_year)) %>%
+    mutate(url = ifelse(year > 2013,
+                        str_c("https://nces.ed.gov/ipeds/datacenter/data/adm", year, ".zip"),
+                        str_c("https://nces.ed.gov/ipeds/datacenter/data/ic", year, ".zip")),
+           data = map2(url, ifelse(year > 2013, 
+                                   str_c("adm", year, ".csv"),
+                                   str_c("ic", year, ".csv")),
+                       read_file))
+  
+  adm_raw <- adm_meta %>%
+    mutate(year_id = year + 1) %>%
+    select(year_id, data) %>%
+    unnest()
+  
+  adm_raw %>%
+    write_db("ched-staging", "adm_raw")
+
+  rm(adm_meta, adm_raw)
+}
+
+```
+
+# Read Data
+
+```{r}
+system.time({
+  adm_raw <- read_db("ched-staging", "SELECT * FROM dbo.adm_raw")
+  })
+```
+
+# Merge Data Into Needed Tables
+
+## Detail Table
+
+
+
+```{r}
+adm <- adm_raw %>%
+  mutate(applcn = ifelse(applcn==0, applcnm + applcnw, applcn),
+         admssn = ifelse(admssn==0, admssnm + admssnw, admssn),
+         enrlm = ifelse(enrlm==0, enrlftm + enrlptm, enrlm),
+         enrlw = ifelse(enrlw==0, enrlftw + enrlptw, enrlw),
+         enrlt = ifelse(enrlt==0, enrlm + enrlw, enrlt),
+         enrlft = ifelse(enrlft==0, enrlftm + enrlftw, enrlft),
+         enrlpt = ifelse(enrlpt==0, enrlptm + enrlptw, enrlpt),
+         applcnu = applcn - (applcnm + applcnw),
+         admssnu = admssn - (admssnm + admssnw),
+         enrltu = enrlt - (enrlm + enrlw),
+         enrlftu = enrlft - (enrlftm + enrlftw),
+         enrlptu = enrlpt - (enrlptm + enrlptw)
+         ) %>%
+  select(unitid,
+         year_id,
+         applcnu,
+         applcnm,
+         applcnw,
+         admssnu,
+         admssnm,
+         admssnw,
+         enrlftu,
+         enrlftm,
+         enrlftw,
+         enrlptu,
+         enrlptm,
+         enrlptw) %>%
+  gather(field,
+         headcount,
+         applcnu:enrlptw) %>%
+  mutate(sex = recode(field,
+                      "applcnm" = "Men",
+                      "admssnm" = "Men",
+                      "enrlftm" = "Men",
+                      "enrlptm" = "Men",
+                      "applcnw" = "Women",
+                      "admssnw" = "Women",
+                      "enrlftw" = "Women",
+                      "enrlptw" = "Women",
+                      .default = 'Unknown'),
+         population = recode(field,
+                             "admssnu" = "admissions",
+                             "admssnm" = "admissions",
+                             "admssnw" = "admissions",
+                             "enrlftu" = "enrolled_full_time",
+                             "enrlftm" = "enrolled_full_time",
+                             "enrlftw" = "enrolled_full_time",
+                             "enrlptu" = "enrolled_part_time",
+                             "enrlptm" = "enrolled_part_time",
+                             "enrlptw" = "enrolled_part_time",
+                             .default = "applications")) %>%
+  filter(headcount > 0) %>%
+  spread(key=population,
+         value=headcount,
+         fill=0) %>%
+  group_by(unitid, year_id, sex) %>%
+  summarise(applications = sum(applications, na.rm = TRUE),
+            admissions = sum(admissions, na.rm = TRUE),
+            enrolled_full_time = sum(enrolled_full_time, na.rm = TRUE),
+            enrolled_part_time = sum(enrolled_part_time, na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(enrolled = enrolled_full_time + enrolled_part_time) %>%
+  select(unitid, year_id, sex, applications, admissions, enrolled)
+
+  adm %>%
+    filter(unitid == 181464,
+         year_id == 2018)
+
+```
+
+# Write to Database
+
+## Detail Table
+
+```{r}
+adm %>%
+  write_db("ched-staging", "ipeds_admissions")
+```
+
