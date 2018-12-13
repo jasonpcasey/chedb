@@ -6,10 +6,10 @@ output: html_notebook
 params:
   read_raw:
     label: "Read Raw"
-    value: "N"
+    value: "Y"
   start_year:
     label: "Start Year"
-    value: 2005
+    value: 2002
   end_year:
     label: "Ending Year"
     value: 2017
@@ -35,30 +35,95 @@ knitr::knit_engines$set(python = reticulate::eng_python)
 source(file="../user-functions.R")
 
 read_file <- function(url, file_name) {
-  recordset <- net_load_zip(url, file_name)
+  recordset <- net_load_zip(url, file_name) %>%
+    mutate(unitid = as.integer(unitid))
+  
+  if (c("dvgrhsm","dvgrhsw", "dvgraim", "dvgraiw", "dvgrapm", "dvgrapw", "dvgrbkm", "dvgrbkw", "dvgrwhm", "dvgrwhw") %in% colnames(recordset)) {
+    recordset <- recordset %>%
+      mutate(grhispm = dvgrhsm,
+             grhispw = dvgrhsw,
+             graianm = dvgraim,
+             graianw = dvgraiw,
+             grasiam = dvgrapm,
+             grasiaw = dvgrapw,
+             grbkaam = dvgrbkm,
+             grbkaaw = dvgrbkw,
+             grnhpim = NA,
+             grnhpiw = NA,
+             grwhitm = dvgrwhm,
+             grwhitw = dvgrwhw)
+    }
+
+    if (c("grrace01", "grrace02") %in% colnames(recordset)) {
+      recordset <- recordset %>%
+        mutate(grnralm = grrace01,
+               grnralw = grrace02,
+               grunknm = grrace13,
+               grunknw = grrace14)
+    }
+  
+    if (c("grrace09", "grrace10", "grrace05", "grrace06", "grrace07", "grrace08", "grrace03", "grrace04") %in% colnames(recordset)) {
+      recordset <- recordset %>%
+        mutate(grhispm = grrace09,
+               grhispw = grrace10,
+               graianm = grrace05,
+               graianw = grrace06,
+               grasiam = grrace07,
+               grasiaw = grrace08,
+               grbkaam = grrace03,
+               grbkaaw = grrace04,
+               grnhpim = NA,
+               grnhpiw = NA,
+               grwhitm = grrace11,
+               grwhitw = grrace12,
+               gr2morm = NA,
+               gr2morw = NA)
+      }
+  
   
   drop_fields <- recordset %>%
     select(starts_with("x")) %>%
              colnames(.)
 
   recordset %>%
-    select(-drop_fields)
+    mutate(grnralm = as.integer(grnralm),
+           grnralw = as.integer(grnralw),
+           grunknm = as.integer(grunknm),
+           grunknw = as.integer(grunknw),
+           grhispm = as.integer(grhispm),
+           grhispw = as.integer(grhispw),
+           graianm = as.integer(graianm),
+           graianw = as.integer(graianw),
+           grasiam = as.integer(grasiam),
+           grasiaw = as.integer(grasiaw),
+           grbkaam = as.integer(grbkaam),
+           grbkaaw = as.integer(grbkaaw),
+           grnhpim = as.integer(grnhpim),
+           grnhpiw = as.integer(grnhpiw),
+           grwhitm = as.integer(grwhitm),
+           grwhitw = as.integer(grwhitw),
+           gr2morm = as.integer(gr2morm),
+           gr2morw = as.integer(gr2morw)) %>%
+    select(unitid, grtype, chrtstat, section, cohort,
+           grnralm, grnralw, grunknm, grunknw, grhispm,
+           grhispw, graianm, graianw, grasiam, grasiaw,
+           grbkaam, grbkaaw, grnhpim, grnhpiw, grwhitm,
+           grwhitw, gr2morm, gr2morw)
 }
 
 if (params$read_raw == "Y") {
-  ay_meta <- tibble(year = seq(params$start_year, params$end_year)) %>%
-    mutate(url = str_c("https://nces.ed.gov/ipeds/datacenter/data/ef", year, "d.zip"),
-           data = map2(url, str_c("ef", year, "d.csv"), read_file))
+  grs_meta <- tibble(year = seq(params$start_year, params$end_year)) %>%
+    mutate(url = str_c("https://nces.ed.gov/ipeds/datacenter/data/gr", year, ".zip"),
+           data = map2(url, str_c("gr", year, ".csv"), read_file))
   
-  retention_raw <- ay_meta %>%
-  select(year, data) %>%
-  unnest()
-  
-  retention_raw %>%
-    mutate(unitid = as.integer(unitid)) %>%
-    write_db("ched-staging", "retention_raw")
+  grs_raw <- grs_meta %>%
+    select(year, data) %>%
+    unnest()
 
-  rm(ay_meta, retention_raw)
+  grs_raw %>%
+    write_db("ched-staging", "grs_raw")
+
+  rm(grs_meta, grs_raw)
 }
 
 ```
@@ -67,8 +132,7 @@ if (params$read_raw == "Y") {
 
 ```{r}
 system.time({
-  retention_raw <- read_db("ched-staging", "SELECT * FROM dbo.retention_raw") %>%
-    mutate(unitid = as.integer(unitid))
+  grs_raw <- read_db("ched-staging", "SELECT * FROM dbo.grs_raw")
   })
 ```
 
@@ -79,42 +143,57 @@ system.time({
 This table contains the published charges by type: tuition, fees, books and supplies, room and board (on-campus), and other expenses.
 
 ```{r}
-retention <- retention_raw %>%
+grad_rates <- grs_raw %>%
+  filter(grtype %in% c(6, 7, 8, 13, 14, 15, 16, 17, 43, 44)) %>%
   mutate(year_id = year + 1,
-         cohort_year_id = year) %>%
-  select(unitid, year_id, cohort_year_id,
-         rrftcta, ret_nmf, rrptcta, ret_nmp) %>%
-  gather(rrftcta:ret_nmp, key = "variable", value = "headcount") %>%
-  mutate(time_status = recode(variable,
-                              "rrftcta" = "Full-time",
-                              "ret_nmf" = "Full-time",
-                              .default = "Part-time"),
-         cohort = recode(variable,
-                         "rrftcta" = "adjusted_cohort",
-                         "rrptcta" = "adjusted_cohort",
-                         .default = "enrolled")) %>%
-  spread(key = cohort,
+         cohort_year_id = year - 5,
+         field = recode(grtype,
+                        `6` = "entering_cohort",
+                        `7` = "exclusions",
+                        `8` = "adjusted_cohort",
+                        `13` = "completers_4_years",
+                        `14` = "completers_5_years",
+                        `15` = "completers_6_years",
+                        `16` = "transfers",
+                        `17` = "enrolled",
+                        `43` = "enrolled",
+                        `44` = "no_longer_enrolled",
+                        .default = "unknown")) %>%
+  select(unitid, year_id, cohort_year_id, field, grnralm:gr2morw) %>%
+  gather(grnralm:gr2morw, key = "variable", value = "headcount") %>%
+  spread(key = field,
          value = headcount,
-         fill=0) %>%
-  group_by(unitid, year_id, cohort_year_id, time_status) %>%
-  summarise(adjusted_cohort = sum(adjusted_cohort),
-            enrolled = sum(enrolled)) %>%
-  ungroup() %>%
-  filter(adjusted_cohort > 0)
+         fill = 0) %>%
+  separate(variable, c("survey", "ethnic_code", "sex"), sep = c(-5, -1)) %>%
+  mutate(completers_5_years = completers_5_years + completers_4_years,
+         completers_6_years = completers_6_years + completers_5_years,
+         sex = recode(sex,
+                      "m" = "Men",
+                      "w" = "Women",
+                      .default = "Unknown"),
+         ethnicity = recode(ethnic_code,
+                            "nral" = "Non-resident Alien",
+                            "aian" = "American Indian or Alaska Native",
+                            "asia" = "Asian",
+                            "bkaa" = "Black or African American",
+                            "hisp" = "Hispanic",
+                            "nhpi" = "Native Hawaiian or Other Pacific Islander",
+                            "whit" = "White",
+                            "2mor" = "Two or More Races",
+                            .default = "Unknown")) %>%
+  select(-survey)
 
-retention %>%
+grad_rates %>%
   filter(unitid == 181464,
-         year_id == 2017) %>%
-  mutate(retention = enrolled / adjusted_cohort)
+         year_id == 2018)
 ```
-
 
 # Write to Database
 
 ## Detail Table
 
 ```{r}
-retention %>%
-  write_db("ched-staging", "ipeds_retention")
+grad_rates %>%
+  write_db("ched-staging", "ipeds_grad_rates")
 ```
 
