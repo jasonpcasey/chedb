@@ -76,7 +76,6 @@ fix_binary <- function(x) {
 
 
 read_files <- function(file1, file2) {
-  #https://nces.ed.gov/ipeds/datacenter/data/HD2017.zip
   url <- "https://nces.ed.gov/ipeds/datacenter/data/"
   
   spec1 <- str_c(url, file1, ".zip")
@@ -217,10 +216,11 @@ if (params$read_raw == "Y") {
     select(year_id, data) %>%
     unnest()
   
-  rm(ic_meta, states, institution_names, nsf_institutions)
-  
   institutions %>%
     write_db("ched-staging", "ipeds_institutions")
+  
+  rm(ic_meta, states, institution_names, nsf_institutions, institutions)
+  
 }
 
 ```
@@ -228,12 +228,9 @@ if (params$read_raw == "Y") {
 # Read Data
 
 ```{r}
-if (params$read_raw == "N") {
-  system.time({
-    institutions <- read_db("ched-staging", "SELECT * FROM dbo.ipeds_institutions")
-    })
-}
-
+system.time({
+  institutions <- read_db("ched-staging", "SELECT * FROM dbo.ipeds_institutions")
+  })
 ```
 
 # Merge Data
