@@ -61,56 +61,11 @@ df %>%
 
 }
 
+# https://nces.ed.gov/ipeds/datacenter/data/EAP2017.zip
+
 occupational_category <- read_file(str_c("https://nces.ed.gov/ipeds/datacenter/data/s", params$year, "_oc.zip"),
                                    str_c("s", params$year, "_oc.csv")) %>%
-  mutate(unitid = as.integer(unitid),
-         facstat = ifelse(occupcat > 399, 60, 90),
-         facstat = ifelse(staffcat == 3210, 49, facstat),
-         facstat = ifelse(ftpt == 4, 55, facstat),
-         occupcat = ifelse(occupcat == 210,
-                           211,
-                           as.integer(occupcat)),
-         faculty_rank = "Unknown",
-         source = "staff",
-         time_status = recode(ftpt,
-                              `2` = "Full-time",
-                              .default = "Part-time")) %>%
-  filter(ftpt > 1,
-         staffcat %in% c(2220, 2230, 2261, 2262, 2263, 2264, 2270,
-                         2300, 2310, 2320, 2330, 2340, 2350, 2360, 2370, 2380, 2390,
-                         3210, 3220, 3230, 3261, 3262, 3263, 3264, 3270, 
-                         3310, 3320, 3330, 3340, 3350, 3360, 3370, 3380, 3390,
-                         4410, 4420, 4430, 4440, 4450, 4460, 4470, 4480)) %>%
-  select(unitid, source, occupcat, facstat, faculty_rank, time_status,
-         hrnralm, hrnralw, hrunknm, hrunknw, hrhispm, hrhispw,
-         hraianm, hraianw, hrasiam, hrasiaw, hrbkaam, hrbkaaw,
-         hrnhpim, hrnhpiw, hrwhitm, hrwhitw, hr2morm, hr2morw)
-
-instructional_staff <- read_file(str_c("https://nces.ed.gov/ipeds/datacenter/data/s", params$year, "_is.zip"),
-                                 str_c("s", params$year, "_is.csv")) %>%
-  mutate(unitid = as.integer(unitid),
-         factstat = ifelse(facstat %in% c(20, 30, 41, 42, 43, 44, 45, 50, 60), as.integer(facstat), 0),
-         occupcat = ifelse(facstat %in% c(20, 30),
-                           215,
-                           211),
-         time_status = "Full-time",
-         faculty_rank = recode(arank,
-                               `1` = "Professors",
-                               `2` = "Associate Professors",
-                               `3` = "Assistant Professors",
-                               `4` = "Instructors",
-                               `5` = "Lecturers",
-                               `6` = "No Academic Rank",
-                               .default = "Unassigned"),
-         source = "instructors") %>%
-  filter(facstat > 0,
-         siscat %in% c(201, 202, 203, 204, 205, 206, 
-                       301, 302, 303, 304, 305, 306, 
-                       411, 412, 413, 414, 415, 416, 
-                       421, 422, 423, 424, 425, 426,
-                       431, 432, 433, 434, 435, 436,
-                       500)) %>%
-  select(unitid, source, occupcat, facstat, faculty_rank, time_status,
+  select(unitid, occupcat, staffcat, ftpt,
          hrnralm, hrnralw, hrunknm, hrunknw, hrhispm, hrhispw,
          hraianm, hraianw, hrasiam, hrasiaw, hrbkaam, hrbkaaw,
          hrnhpim, hrnhpiw, hrwhitm, hrwhitw, hr2morm, hr2morw)
@@ -126,11 +81,7 @@ instructional_staff <- read_file(str_c("https://nces.ed.gov/ipeds/datacenter/dat
 occupational_category
 ```
 
-## Instructional Staff
-
-```{r}
-instructional_staff
-```
+# Make Table
 
 ## Fall Staff
 
@@ -138,10 +89,26 @@ instructional_staff
 year <- params$year
 
 fall_staff <- occupational_category %>%
-  bind_rows(instructional_staff) %>%
+  filter(ftpt > 1,
+         staffcat %in% c(2210, 2220, 2230, 2261, 2262, 2263, 2264, 2270,
+                         2300, 2310, 2320, 2330, 2340, 2350, 2360, 2370, 2380, 2390,
+                         3210, 3220, 3230, 3261, 3262, 3263, 3264, 3270, 
+                         3300, 3310, 3320, 3330, 3340, 3350, 3360, 3370, 3380, 3390,
+                         4410, 4420, 4430, 4440, 4450, 4460, 4470, 4480, 4490)) %>%
   gather(hrnralm:hr2morw, key = "variable", value = "headcount") %>%
   separate(variable, c("survey", "demographic_key"), sep = c(2)) %>%
-  mutate(date_key = (year * 10000) + 1101,
+  mutate(unitid = as.integer(unitid),
+         occupcat = ifelse(occupcat == 210,
+                           211,
+                           as.integer(occupcat)),
+         time_status_id = recode(ftpt,
+                              `2` = "FT",
+                              .default = "PT"),
+         time_status = recode(ftpt,
+                              `2` = "Full-time",
+                              .default = "Part-time"),
+         date_key = (year * 10000) + 1101,
+         employee_key = str_c(occupcat, time_status_id),
          occupational_category = recode(occupcat,
                                         `211` = "Instructional staff, primarily instruction",
                                         `212` = "Instructional staff, primarily instruction, exclusively credit",
@@ -176,27 +143,26 @@ fall_staff <- occupational_category %>%
                                         `460` = "Graduate Assistants Community Service, Legal, Arts, and Media",
                                         `470` = "Graduate Assistants Library and Instructional support",
                                         `480` = "Graduate Assistants Healthcare Practioners and Technical",
-                                        .default = "Unknown"),
-         # Use SIS Codes????
-         contract_type_id = recode(facstat,
-                                   `41` = 1, 
-                                   `42` = 2,
-                                   `43` = 3,
-                                   .default = 0),
-         contract_type = recode(facstat,
-                                `41` = "Multi-year or Indefinite",
-                                `42` = "Annual",
-                                `43` = "Less-than-annual",
-                                `44` = "Multi-year",
-                                `45` = "Indefinite",
-                                .default = "Unknown")) %>%
-  select(unitid, date_key, source, occupcat, occupational_category, 
-         facstat, faculty_rank, 
-         contract_type_id, contract_type,
+                                        .default = "Unknown")) %>%
+  select(unitid, date_key, employee_key, occupcat, occupational_category,
          time_status, demographic_key, headcount)
 
 fall_staff
 ```
+
+## Staff Dim Table
+
+```{r}
+staff_dim <- fall_staff %>%
+  count(employee_key, occupational_category, time_status) %>%
+  select(-n)
+
+staff_dim
+```
+
+# Write Data
+
+## Fall Staff
 
 ```{r}
 write_db <- function(frame, db, tab) {
@@ -215,6 +181,14 @@ write_db <- function(frame, db, tab) {
 
 
 fall_staff %>%
+  select(unitid, date_key, employee_key, demographic_key, headcount) %>%
   write_db("ched-staging", "ipeds_fall_staff")
+```
+
+## Staff Dim Table
+
+```{r}
+staff_dim %>%
+  write_db("ched-staging", "staff_codes")
 ```
 
