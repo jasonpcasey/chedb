@@ -212,9 +212,9 @@ if (params$read_raw == "Y") {
     mutate(data = map2(str_c("hd", year), str_c("ic", year), read_files))
   
   institutions <- ic_meta %>%
-    mutate(year_id = year + 1) %>%
-    select(year_id, data) %>%
-    unnest()
+    select(year, data) %>%
+    unnest() %>%
+    mutate(date_key = (year * 10000) + 0901)
   
   institutions %>%
     write_db("ched-staging", "ipeds_institutions")
@@ -231,6 +231,14 @@ if (params$read_raw == "Y") {
 system.time({
   institutions <- read_db("ched-staging", "SELECT * FROM dbo.ipeds_institutions")
   })
+```
+
+# Check for Dupes
+
+```{r}
+institutions %>%
+  count(unitid, date_key) %>%
+  filter(n > 1)
 ```
 
 # Merge Data

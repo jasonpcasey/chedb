@@ -6,7 +6,7 @@ output: html_notebook
 params:
   read_raw:
     label: "Read Raw"
-    value: "N"
+    value: "Y"
   start_year:
     label: "Start Year"
     value: 2010
@@ -61,7 +61,6 @@ if (params$read_raw == "Y") {
   
   sfa <- sfa_meta %>%
     select(year, data) %>%
-    mutate(year_id = year) %>%
     unnest()
   
   sfa %>%
@@ -92,6 +91,7 @@ div100 <- function(x) {
 
 aid <- sfa %>%
   mutate(unitid = as.integer(unitid),
+         date_key = (year * 10000) + 0630,
          total_undergraduates = as.integer(scugrad),
          full_time_freshman_cohort = as.integer(scugffn),
          total_number = as.integer(gistn2),
@@ -115,7 +115,7 @@ aid <- sfa %>%
          total_federal_student_loans = as.integer(floan_t),
          awarded_other_student_loans = as.integer(oloan_n),
          total_other_student_loans = as.integer(oloan_t)) %>%
-  select(unitid, year_id, total_undergraduates:total_other_student_loans)
+  select(unitid, date_key, total_undergraduates:total_other_student_loans)
 
 ```
 
@@ -150,7 +150,7 @@ aid_income_band <- sfa %>%
   separate(variable, c("stub", "type", "income_band_id", "index"), c(-3, -2, -1)) %>%
   select(unitid, year, stub, type, income_band_id, index, amount) %>%
   mutate(index = 2 - as.integer(index),
-         year_id = year - index,
+         date_key = ((year - index) * 10000) + 0630,
          income_band = recode(income_band_id,
                               "1" = "$0 - $30,000",
                               "2" = "$30,001 - $48,000",
@@ -165,16 +165,16 @@ aid_income_band <- sfa %>%
                            "4" = "average_net_price"),
          amount = as.numeric(amount)) %>%
   filter(amount >= 0) %>%
-  select(unitid, year_id, year, income_band, variable, amount)
+  select(unitid, date_key, year, income_band, variable, amount)
 
 aid_income_band <- aid_income_band %>%
-  group_by(unitid, year_id) %>%
+  group_by(unitid, date_key) %>%
   summarize(year = max(year, na.rm = TRUE)) %>%
   ungroup() %>%
-  select(unitid, year, year_id) %>%
+  select(unitid, year, date_key) %>%
   inner_join(aid_income_band) %>%
   spread(key = variable, value = amount) %>%
-  select(unitid, year_id, income_band, count, grant_recipients, total_amount, average_amount, average_net_price)
+  select(unitid, date_key, income_band, count, grant_recipients, total_amount, average_amount, average_net_price)
 
 aid_income_band %>%
   filter(unitid == 181464)

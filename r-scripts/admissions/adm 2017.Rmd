@@ -75,8 +75,7 @@ if (params$read_raw == "Y") {
                        read_file))
   
   adm_raw <- adm_meta %>%
-    mutate(year_id = year + 1) %>%
-    select(year_id, data) %>%
+    select(year, data) %>%
     unnest()
   
   adm_raw %>%
@@ -103,7 +102,8 @@ system.time({
 
 ```{r}
 adm <- adm_raw %>%
-  select(unitid, year_id,
+  mutate(date_key = (year * 10000) + 1015) %>%
+  select(unitid, date_key,
          applcn, applcnm, applcnw,
          admssn, admssnm, admssnw,
          enrlt, enrlm, enrlw, enrlft,
@@ -127,43 +127,37 @@ adm <- adm_raw %>%
   gather(field,
          headcount,
          applcn:enrlptu) %>%
-  mutate(sex = recode(field,
-                      "applcnm" = "Men",
-                      "admssnm" = "Men",
-                      "enrlftm" = "Men",
-                      "enrlptm" = "Men",
-                      "applcnw" = "Women",
-                      "admssnw" = "Women",
-                      "enrlftw" = "Women",
-                      "enrlptw" = "Women",
-                      .default = "Unknown"),
+  separate(field, c("field", "sex"), sep = c(-1)) %>%
+  mutate(demographic_key = recode(sex,
+                                  "w" = "unknw",
+                                  "m" = "unknm",
+                                  .default = "unknu"),
          population = recode(field,
-                             "admssnu" = "admissions",
-                             "admssnm" = "admissions",
-                             "admssnw" = "admissions",
-                             "enrlftu" = "enrolled_full_time",
-                             "enrlftm" = "enrolled_full_time",
-                             "enrlftw" = "enrolled_full_time",
-                             "enrlptu" = "enrolled_part_time",
-                             "enrlptm" = "enrolled_part_time",
-                             "enrlptw" = "enrolled_part_time",
+                             "admssn" = "admissions",
+                             "admssn" = "admissions",
+                             "admssn" = "admissions",
+                             "enrlft" = "enrolled_full_time",
+                             "enrlft" = "enrolled_full_time",
+                             "enrlft" = "enrolled_full_time",
+                             "enrlpt" = "enrolled_part_time",
+                             "enrlpt" = "enrolled_part_time",
+                             "enrlpt" = "enrolled_part_time",
                              .default = "applications")) %>%
   filter(headcount > 0) %>%
   spread(key=population,
          value=headcount,
          fill=0) %>%
-  group_by(unitid, year_id, sex) %>%
+  group_by(unitid, date_key, demographic_key) %>%
   summarise(applications = sum(applications, na.rm = TRUE),
             admissions = sum(admissions, na.rm = TRUE),
             enrolled_full_time = sum(enrolled_full_time, na.rm = TRUE),
             enrolled_part_time = sum(enrolled_part_time, na.rm = TRUE)) %>%
   ungroup() %>%
   mutate(enrolled = enrolled_full_time + enrolled_part_time) %>%
-  select(unitid, year_id, sex, applications, admissions, enrolled)
+  select(unitid, date_key, demographic_key, applications, admissions, enrolled)
 
   adm %>%
-    filter(unitid == 181464,
-           year_id == 2018)
+    filter(date_key == 20171015)
 
 ```
 
@@ -171,75 +165,76 @@ adm <- adm_raw %>%
 
 ```{r}
 scores <- adm_raw %>%
-    select(unitid, year_id, satnum, satpct,
-           actnum, actpct, satvr25, satvr75,
-           satmt25, satmt75, satwr25, satwr75,
-           actcm25, actcm75, acten25, acten75,
-           actmt25, actmt75, actwr25, actwr75) %>%
+  mutate(date_key = (year * 10000) + 1015) %>%
+  select(unitid, date_key, satnum, satpct,
+         actnum, actpct, satvr25, satvr75,
+         satmt25, satmt75, satwr25, satwr75,
+         actcm25, actcm75, acten25, acten75,
+         actmt25, actmt75, actwr25, actwr75) %>%
   mutate(actpct = actpct / 100,
          satpct = satpct / 100) %>%
   gather(satnum:actwr75, key = "variable", value = "val") %>%
   mutate(test_type = recode(variable,
-                         "satnum" = "SAT",
-                         "satpct" = "SAT",
-                         "satvr25" = "SAT",
-                         "satvr75" = "SAT",
-                         "satmt25" = "SAT",
-                         "satmt75" = "SAT",
-                         "satwr25" = "SAT",
-                         "satwr75" = "SAT",
-                         "actnum" = "ACT",
-                         "actpct" = "ACT",
-                         "actcm25" = "ACT",
-                         "actcm75" = "ACT",
-                         "acten25" = "ACT",
-                         "acten75" = "ACT",
-                         "actmt25" = "ACT",
-                         "actmt75" = "ACT",
-                         "actwr25" = "ACT",
-                         "actwr75" = "ACT"),
+                            "satnum" = "SAT",
+                            "satpct" = "SAT",
+                            "satvr25" = "SAT",
+                            "satvr75" = "SAT",
+                            "satmt25" = "SAT",
+                            "satmt75" = "SAT",
+                            "satwr25" = "SAT",
+                            "satwr75" = "SAT",
+                            "actnum" = "ACT",
+                            "actpct" = "ACT",
+                            "actcm25" = "ACT",
+                            "actcm75" = "ACT",
+                            "acten25" = "ACT",
+                            "acten75" = "ACT",
+                            "actmt25" = "ACT",
+                            "actmt75" = "ACT",
+                            "actwr25" = "ACT",
+                            "actwr75" = "ACT"),
          subject = recode(variable,
-                            "satnum" = "Composite",
-                            "satpct" = "Composite",
-                            "actnum" = "Composite",
-                            "actpct" = "Composite",
-                            "actcm25" = "Composite",
-                            "actcm75" = "Composite",
-                            "satmt25" = "Math",
-                            "satmt75" = "Math",
-                            "actmt25" = "Math",
-                            "actmt75" = "Math",
-                            "satvr25" = "Verbal",
-                            "satvr75" = "Verbal",
-                            "satwr25" = "Writing",
-                            "satwr75" = "Writing",
-                            "actwr25" = "Writing",
-                            "actwr75" = "Writing",
-                            "acten25" = "English",
-                            "acten75" = "English"),
+                          "satnum" = "Composite",
+                          "satpct" = "Composite",
+                          "actnum" = "Composite",
+                          "actpct" = "Composite",
+                          "actcm25" = "Composite",
+                          "actcm75" = "Composite",
+                          "satmt25" = "Math",
+                          "satmt75" = "Math",
+                          "actmt25" = "Math",
+                          "actmt75" = "Math",
+                          "satvr25" = "Verbal",
+                          "satvr75" = "Verbal",
+                          "satwr25" = "Writing",
+                          "satwr75" = "Writing",
+                          "actwr25" = "Writing",
+                          "actwr75" = "Writing",
+                          "acten25" = "English",
+                          "acten75" = "English"),
          count = ifelse(variable %in% c("satnum",
                                         "actnum"), val, 0),
          percentage = ifelse(variable %in% c("satpct",
                                              "actpct"), val, 0),
          percentile_25 = ifelse(variable %in% c("satvr25",
-                                               "satmt25",
-                                               "satwr25",
-                                               "actcm25",
-                                               "acten25",
-                                               "actmt25",
-                                               "actwr25"), val, 0),
+                                                "satmt25",
+                                                "satwr25",
+                                                "actcm25",
+                                                "acten25",
+                                                "actmt25",
+                                                "actwr25"), val, 0),
          percentile_75 = ifelse(variable %in% c("satvr75",
-                                               "satmt75",
-                                               "satwr75",
-                                               "actcm75",
-                                               "acten75",
-                                               "actmt75",
-                                               "actwr75"), val, 0)) %>%
-  group_by(unitid, year_id, test_type, subject) %>%
+                                                "satmt75",
+                                                "satwr75",
+                                                "actcm75",
+                                                "acten75",
+                                                "actmt75",
+                                                "actwr75"), val, 0)) %>%
+  group_by(unitid, date_key, test_type, subject) %>%
   summarise(count = sum(count, na.rm = TRUE),
-         percentage = sum(percentage, na.rm = TRUE),
-         percentile_25 = sum(percentile_25, na.rm = TRUE),
-         percentile_75 = sum(percentile_75, na.rm = TRUE)) %>%
+            percentage = sum(percentage, na.rm = TRUE),
+            percentile_25 = sum(percentile_25, na.rm = TRUE),
+            percentile_75 = sum(percentile_75, na.rm = TRUE)) %>%
   ungroup() %>%
   filter(count > 0 | percentage > 0 | percentile_25 > 0 | percentile_75 > 0) %>%
   mutate(count = ifelse(count == 0, NA, count),
@@ -250,7 +245,7 @@ scores <- adm_raw %>%
 
   scores %>%
     filter(unitid == 181464,
-           year_id == 2018)
+           date_key == 20171015)
 
 ```
 

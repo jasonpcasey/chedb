@@ -139,8 +139,8 @@ charges <- charges %>%
   summarize(year_id = max(year_id)) %>%
   ungroup() %>%
   semi_join(charges, .) %>%
-  mutate(year_id = year) %>%
-  select(unitid, year_id, student_residency, charge_type, charge)
+  mutate(date_key = (year * 10000) + 0901) %>%
+  select(unitid, date_key, student_residency, charge_type, charge)
 
 charges
 ```
@@ -157,11 +157,11 @@ avg_charges <- charges_raw %>%
          key = "variable", value = "charge") %>%
   separate(variable, c("type", "class"), -1) %>%
   mutate(unitid = as.integer(unitid),
-         year_id = year + 1,
+         date_key = ((year + 1) * 10000) + 0901,
          charge_type = recode(type,
-                       "tuition" = "Average Tuition",
-                       "fee" = "Required Fees",
-                       "hrchg" = "Per Credit Hour Charge",
+                       "tuition" = "average_tuition",
+                       "fee" = "required_fees",
+                       "hrchg" = "per_student_credit_hour_charge",
                        .default = "Unknown"),
          student_career = ifelse(as.integer(class) < 5, "Undergraduate", "Graduate"),
          student_residency = recode(class,
@@ -173,7 +173,7 @@ avg_charges <- charges_raw %>%
                                     "7" = "Out-of-state",
                                     .default = "Unknown"),
          charge = as.numeric(charge)) %>%
-  select(unitid, year_id, charge_type, student_career, student_residency, charge) %>%
+  select(unitid, date_key, charge_type, student_career, student_residency, charge) %>%
   spread(charge_type, charge)
 
 avg_charges

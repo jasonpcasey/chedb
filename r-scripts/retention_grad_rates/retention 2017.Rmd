@@ -80,9 +80,9 @@ This table contains the published charges by type: tuition, fees, books and supp
 
 ```{r}
 retention <- retention_raw %>%
-  mutate(year_id = year + 1,
-         cohort_year_id = year) %>%
-  select(unitid, year_id, cohort_year_id,
+  mutate(date_key = (year * 10000) + 1015,
+         cohort_date_key = ((year - 1) * 10000) + 1015) %>%
+  select(unitid, date_key, cohort_date_key,
          rrftcta, ret_nmf, rrptcta, ret_nmp) %>%
   gather(rrftcta:ret_nmp, key = "variable", value = "headcount") %>%
   mutate(time_status = recode(variable,
@@ -96,7 +96,7 @@ retention <- retention_raw %>%
   spread(key = cohort,
          value = headcount,
          fill=0) %>%
-  group_by(unitid, year_id, cohort_year_id, time_status) %>%
+  group_by(unitid, date_key, cohort_date_key, time_status) %>%
   summarise(adjusted_cohort = sum(adjusted_cohort),
             enrolled = sum(enrolled)) %>%
   ungroup() %>%
@@ -104,7 +104,7 @@ retention <- retention_raw %>%
 
 retention %>%
   filter(unitid == 181464,
-         year_id == 2017) %>%
+         date_key == 20161015) %>%
   mutate(retention = enrolled / adjusted_cohort)
 ```
 

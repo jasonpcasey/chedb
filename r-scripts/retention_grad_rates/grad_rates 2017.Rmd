@@ -6,7 +6,7 @@ output: html_notebook
 params:
   read_raw:
     label: "Read Raw"
-    value: "Y"
+    value: "N"
   start_year:
     label: "Start Year"
     value: 2002
@@ -81,9 +81,9 @@ read_file <- function(url, file_name) {
       }
   
   
-  drop_fields <- recordset %>%
-    select(starts_with("x")) %>%
-             colnames(.)
+  # drop_fields <- recordset %>%
+  #   select(starts_with("x")) %>%
+  #            colnames(.)
 
   recordset %>%
     mutate(grnralm = as.integer(grnralm),
@@ -145,8 +145,8 @@ This table contains the published charges by type: tuition, fees, books and supp
 ```{r}
 grad_rates <- grs_raw %>%
   filter(grtype %in% c(6, 7, 8, 13, 14, 15, 16, 17, 43, 44)) %>%
-  mutate(year_id = year + 1,
-         cohort_year_id = year - 5,
+  mutate(date_key = (year * 10000) + 0531,
+         cohort_date_key = ((year - 6) * 10000) + 1015,
          field = recode(grtype,
                         `6` = "entering_cohort",
                         `7` = "exclusions",
@@ -159,33 +159,19 @@ grad_rates <- grs_raw %>%
                         `43` = "enrolled",
                         `44` = "no_longer_enrolled",
                         .default = "unknown")) %>%
-  select(unitid, year_id, cohort_year_id, field, grnralm:gr2morw) %>%
+  select(unitid, date_key, cohort_date_key, field, grnralm:gr2morw) %>%
   gather(grnralm:gr2morw, key = "variable", value = "headcount") %>%
   spread(key = field,
          value = headcount,
          fill = 0) %>%
-  separate(variable, c("survey", "ethnic_code", "sex"), sep = c(-5, -1)) %>%
+  separate(variable, c("survey", "demographic_key"), sep = c(2)) %>%
   mutate(completers_5_years = completers_5_years + completers_4_years,
-         completers_6_years = completers_6_years + completers_5_years,
-         sex = recode(sex,
-                      "m" = "Men",
-                      "w" = "Women",
-                      .default = "Unknown"),
-         ethnicity = recode(ethnic_code,
-                            "nral" = "Non-resident Alien",
-                            "aian" = "American Indian or Alaska Native",
-                            "asia" = "Asian",
-                            "bkaa" = "Black or African American",
-                            "hisp" = "Hispanic",
-                            "nhpi" = "Native Hawaiian or Other Pacific Islander",
-                            "whit" = "White",
-                            "2mor" = "Two or More Races",
-                            .default = "Unknown")) %>%
+         completers_6_years = completers_6_years + completers_5_years) %>%
   select(-survey)
 
 grad_rates %>%
   filter(unitid == 181464,
-         year_id == 2018)
+         date_key == 20170531)
 ```
 
 # Write to Database
