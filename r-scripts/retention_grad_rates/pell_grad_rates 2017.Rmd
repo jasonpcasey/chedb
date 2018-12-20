@@ -1,0 +1,127 @@
+---
+title: "Load IPEDS Graduation Rates"
+author: "Jason P. Casey"
+date: 2018-12-12
+output: html_notebook
+params:
+  read_raw:
+    label: "Read Raw"
+    value: "Y"
+  start_year:
+    label: "Start Year"
+    value: 2016
+  end_year:
+    label: "Ending Year"
+    value: 2017
+---
+
+# Setup
+
+Data setup:
+
+_read_raw_ parameter determines whether to do a data pull across the web.  This is costly, so only do so if new data need to be pulled.  Two options: Y or N.
+
+_start_year_ parameter determines the first year to be added.  Correspondingly,
+_end_year_ parameter sets the ending year.  Present values are based on the universe change in 2010 and the most recent year of available data.
+
+```{r setup}
+# knitr options
+knitr::opts_chunk$set(fig.width = 8,
+                      fig.asp = 0.618,
+                      echo = TRUE)
+knitr::knit_engines$set(python = reticulate::eng_python)
+
+# include user functions
+source(file="../user-functions.R")
+
+read_file <- function(url, file_name) {
+  recordset <- net_load_zip(url, file_name) %>%
+    mutate(unitid = as.integer(unitid))
+  
+  drop_fields <- recordset %>%
+    select(starts_with("x")) %>%
+             colnames(.)
+
+  recordset %>%
+    # select(-drop_fields)
+    select(unitid,
+           psgrtype, pgrevct, pgexclu, pgadjct,
+           pgcmbac, ssrevct, ssexclu, ssadjct,
+           sscmbac, nrrevct, nrexclu, nradjct,
+           nrcmbac)
+}
+
+if (params$read_raw == "Y") {
+  pell_meta <- tibble(year = seq(params$start_year, params$end_year)) %>%
+    mutate(url = str_c("https://nces.ed.gov/ipeds/datacenter/data/gr", year, "_pell_ssl.zip"),
+           data = map2(url, str_c("gr", year, "_pell_ssl.csv"), read_file))
+  
+  pell_raw <- pell_meta %>%
+    select(year, data) %>%
+    unnest()
+
+  pell_raw %>%
+    write_db("ched-staging", "pell_raw")
+
+  rm(pell_meta, pell_raw)
+}
+
+```
+
+# Read Data
+
+```{r}
+system.time({
+  pell_raw <- read_db("ched-staging", "SELECT * FROM dbo.pell_raw")
+  })
+```
+
+# Merge Data Into Needed Tables
+
+## Detail Table
+
+This table contains the published charges by type: tuition, fees, books and supplies, room and board (on-campus), and other expenses.
+
+```{r}
+pell_grad_rates <- pell_raw %>%
+  filter(psgrtype %in% c(2, 3)) %>%
+  mutate(date_key = (year * 10000) + 0531,
+         cohort_date_key = ((year - 6) * 10000) + 1015,
+         cohort_type = recode(psgrtype,
+                              `2` = "Bachelors Degree-seeking",
+                              `3` = "Other Degree/Certificate-seeking",
+                              .default = "Unknown")) %>%
+  select(unitid, date_key, cohort_date_key, cohort_type, pgrevct:nrcmbac) %>%
+  gather(pgrevct:nrcmbac, key = "variable", value = "headcount") %>%
+  separate(variable, c("aid_type", "field"), sep = 2) %>%
+  mutate(aid_type = recode(aid_type,
+                           "pg" = "Pell Grant Recipients",
+                           "ss" = "Subsidized Loan Recipients",
+                           "nr" = "Did Not Receive Pell Grant or Subsidized Loan",
+                           .default = "Unknown"),
+         field = recode(field,
+                        "revct" = "revised_cohort",
+                        "exclu" = "exclusions",
+                        "adjct" = "adjusted_cohort",
+                        "cmbac" = "completers_6_years",
+                        .default = "unknown")) %>%
+  spread(key = field,
+         value = headcount,
+         fill = 0) %>%
+  select(unitid, date_key, cohort_date_key, cohort_type, aid_type, adjusted_cohort, completers_6_years)
+
+
+pell_grad_rates %>%
+  filter(unitid == 181464,
+         date_key == 20170531)
+```
+
+# Write to Database
+
+## Detail Table
+
+```{r}
+pell_grad_rates %>%
+  write_db("ched-staging", "ipeds_pell_grad_rates")
+```
+
