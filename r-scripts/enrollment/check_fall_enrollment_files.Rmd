@@ -1,0 +1,75 @@
+---
+title: "Check EF File Notebook"
+author: "Jason P. Casey"
+date: 2018-12-17
+output: html_notebook
+params:
+  year:
+    label: "Year (Fall)"
+    value: 2008
+---
+
+```{r setup}
+# knitr options
+knitr::opts_chunk$set(fig.width = 8,
+                      fig.asp = 0.618,
+                      echo = TRUE)
+knitr::knit_engines$set(python = reticulate::eng_python)
+
+library(DBI)
+library(odbc)
+library(readxl)
+library(lubridate)
+library(kableExtra)
+library(tidyverse)
+
+# access zipped data via net
+net_load_zip <- function(file_url, file_name)
+{
+  #Download data file
+  temp <- tempfile()
+  
+  download.file(file_url,
+                temp)
+  
+  files <- unzip(temp, list = TRUE)
+
+  spec <- files$Name[str_detect(files$Name, "_rv")]
+
+  file_name <- ifelse(length(spec) == 0, file_name, spec)
+  
+  data <- read_csv(unz(temp, file_name),
+                   locale = locale(encoding = "latin1")) %>%
+    rename_all(tolower)
+  
+  unlink(temp)
+  rm(temp)
+  
+  return(data)
+}
+
+read_file <- function(year, file) {
+  url <- str_c("https://nces.ed.gov/ipeds/datacenter/data/ef", year, "a.zip")
+
+  df <- net_load_zip(url, file)
+  
+  drop_fields <- df %>%
+    select(starts_with("x")) %>%
+    colnames(.)
+
+df %>%
+  select(-drop_fields)
+
+}
+
+ef <- read_file(params$year, str_c("ef", params$year, "a.csv")) %>%
+  mutate(unitid = as.integer(unitid))
+
+```
+
+```{r}
+ef %>%
+  filter(unitid == 174066)
+```
+
+

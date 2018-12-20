@@ -1,0 +1,245 @@
+---
+title: "Load IPEDS Graduation Rates"
+author: "Jason P. Casey"
+date: 2018-12-16
+output: html_notebook
+params:
+  read_raw:
+    label: "Read Raw"
+    value: "N"
+  start_year:
+    label: "Start Year"
+    value: 2002
+  end_year:
+    label: "Ending Year"
+    value: 2017
+---
+
+# Setup
+
+Data setup:
+
+_read_raw_ parameter determines whether to do a data pull across the web.  This is costly, so only do so if new data need to be pulled.  Two options: Y or N.
+
+_start_year_ parameter determines the first year to be added.  Correspondingly,
+_end_year_ parameter sets the ending year.  Present values are based on the universe change in 2010 and the most recent year of available data.
+
+```{r setup}
+# knitr options
+knitr::opts_chunk$set(fig.width = 8,
+                      fig.asp = 0.618,
+                      echo = TRUE)
+knitr::knit_engines$set(python = reticulate::eng_python)
+
+# include user functions
+source(file="../user-functions.R")
+
+read_file <- function(year, file_name) {
+  url <- str_c("https://nces.ed.gov/ipeds/datacenter/data/ef", year, "a.zip")
+  
+  recordset <- net_load_zip(url, file_name) %>%
+    mutate(unitid = as.integer(unitid))
+  
+  if (year < 2008) {
+    recordset <- recordset %>%
+      filter(efalevel %in% c(24, 25, 31, 32, 36, 44, 45, 51, 52, 56)) %>%
+      mutate(efnralm = as.integer(efrace01),
+             efnralw = as.integer(efrace02),
+             efunknm = as.integer(efrace13),
+             efunknw = as.integer(efrace14),
+             efhispm = as.integer(efrace09),
+             efhispw = as.integer(efrace10),
+             efaianm = as.integer(efrace05),
+             efaianw = as.integer(efrace06),
+             efasiam = as.integer(efrace07),
+             efasiaw = as.integer(efrace08),
+             efbkaam = as.integer(efrace03),
+             efbkaaw = as.integer(efrace04),
+             efnhpim = 0,
+             efnhpiw = 0,
+             efwhitm = as.integer(efrace11),
+             efwhitw = as.integer(efrace12),
+             ef2morm = 0,
+             ef2morw = 0)
+      
+  }
+  
+    if (year == 2008) {
+      recordset <- recordset %>%
+        filter(efalevel %in% c(24, 25, 31, 32, 36, 44, 45, 51, 52, 56)) %>%
+        mutate(efnralm = as.integer(efnralm),
+               efnralw = as.integer(efnralw),
+               efunknm = as.integer(efunknm),
+               efunknw = as.integer(efunknw),
+               efhispm = as.integer(dvefhsm),
+               efhispw = as.integer(dvefhsw),
+               efaianm = as.integer(dvefaim),
+               efaianw = as.integer(dvefaiw),
+               efasiam = as.integer(dvefapm),
+               efasiaw = as.integer(dvefapw),
+               efbkaam = as.integer(dvefbkm),
+               efbkaaw = as.integer(dvefbkw),
+               efnhpim = 0,
+               efnhpiw = 0,
+               efwhitm = as.integer(dvefwhm),
+               efwhitw = as.integer(dvefwhw))
+    }
+  
+    if (year == 2009) {
+      recordset <- recordset %>%
+        filter(efalevel %in% c(24, 31, 32, 39, 40, 44, 51, 52, 59, 60)) %>%
+        mutate(efnralm = as.integer(efnralm),
+               efnralw = as.integer(efnralw),
+               efunknm = as.integer(efunknm),
+               efunknw = as.integer(efunknw),
+               efhispm = as.integer(dvefhsm),
+               efhispw = as.integer(dvefhsw),
+               efaianm = as.integer(dvefaim),
+               efaianw = as.integer(dvefaiw),
+               efasiam = as.integer(dvefapm),
+               efasiaw = as.integer(dvefapw),
+               efbkaam = as.integer(dvefbkm),
+               efbkaaw = as.integer(dvefbkw),
+               efnhpim = 0,
+               efnhpiw = 0,
+               efwhitm = as.integer(dvefwhm),
+               efwhitw = as.integer(dvefwhw))
+    }
+  
+    if (year > 2009) {
+      recordset <- recordset %>%
+        filter(efalevel %in% c(24, 31, 32, 39, 40, 44, 51, 52, 59, 60)) %>%
+        mutate(efnralm = as.integer(efnralm),
+               efnralw = as.integer(efnralw),
+               efunknm = as.integer(efunknm),
+               efunknw = as.integer(efunknw),
+               efhispm = as.integer(efhispm),
+               efhispw = as.integer(efhispw),
+               efaianm = as.integer(efaianm),
+               efaianw = as.integer(efaianw),
+               efasiam = as.integer(efasiam),
+               efasiaw = as.integer(efasiaw),
+               efbkaam = as.integer(efbkaam),
+               efbkaaw = as.integer(efbkaaw),
+               efnhpim = as.integer(efnhpim),
+               efnhpiw = as.integer(efnhpiw),
+               efwhitm = as.integer(efwhitm),
+               efwhitw = as.integer(efwhitw),
+               ef2morm = as.integer(ef2morm),
+               ef2morw = as.integer(ef2morw))
+    }
+
+  recordset %>%
+    select(unitid, efalevel,
+           efnralm, efnralw, efunknm, efunknw, efhispm,
+           efhispw, efaianm, efaianw, efasiam, efasiaw,
+           efbkaam, efbkaaw, efnhpim, efnhpiw, efwhitm,
+           efwhitw, ef2morm, ef2morw)
+}
+
+if (params$read_raw == "Y") {
+  ef_meta <- tibble(year = seq(params$start_year, params$end_year)) %>%
+    mutate(url = str_c("https://nces.ed.gov/ipeds/datacenter/data/ef", year, "a.zip"),
+           file_name = str_c("ef", year, "a.csv"),
+           data = map2(year, file_name, read_file))
+  
+  ef_raw <- ef_meta %>%
+    select(year, data) %>%
+    unnest()
+
+  ef_raw %>%
+    write_db("ched-staging", "ef_raw")
+
+  rm(ef_meta, ef_raw)
+}
+
+```
+
+# Read Data
+
+```{r}
+system.time({
+  ef_raw <- read_db("ched-staging", "SELECT * FROM dbo.ef_raw")
+  })
+```
+
+# Merge Data Into Needed Tables
+
+## Detail Table
+
+This table contains the published charges by type: tuition, fees, books and supplies, room and board (on-campus), and other expenses.
+
+```{r}
+fall_enrollment <- ef_raw %>%
+  mutate(date_key = (year * 10000) + 1015,
+         time_status = recode(efalevel,
+                              `24` = "Full-time",
+                              `25` = "Full-time",
+                              `31` = "Full-time",
+                              `32` = "Full-time",
+                              `36` = "Full-time",
+                              `39` = "Full-time",
+                              `40` = "Full-time",
+                              .default = "Part-time"),
+         career_level = recode(efalevel,
+                               `32` = "Graduate",
+                               `36` = "Graduate",
+                               `52` = "Graduate",
+                               `56` = "Graduate",
+                               .default = "Undergraduate"),
+         degree_seeking = recode(efalevel,
+                                 `24` = "Degree-seeking",
+                                 `25` = "Degree-seeking",
+                                 `31` = "Non-degree-seeking",
+                                 `39` = "Degree-seeking",
+                                 `40` = "Degree-seeking",
+                                 `44` = "Degree-seeking",
+                                 `45` = "Degree-seeking",
+                                 `51` = "Non-degree-seeking",
+                                 `59` = "Degree-seeking",
+                                 `60` = "Degree-seeking",
+                                 .default = "Unknown"),
+         continuation_type = recode(efalevel,
+                                    `24` = "First-time",
+                                    `39` = "Transfer",
+                                    `40` = "Continuing",
+                                    `44` = "First-time",
+                                    `59` = "Transfer",
+                                    `60` = "Continuing",
+                                    .default = "Unknown")) %>%
+  select(unitid, date_key, time_status:continuation_type, efnralm:ef2morw) %>%
+  gather(efnralm:ef2morw, key = "variable", value = "headcount") %>%
+  separate(variable, c("survey", "demographic_key"), sep = c(2)) %>%
+  select(-survey)
+
+fall_enrollment %>%
+  filter(unitid == 181464,
+         date_key == 20171015)
+```
+
+## Check for Dupes
+
+```{r}
+fall_enrollment %>%
+  count(unitid, date_key, time_status, career_level, degree_seeking, continuation_type, demographic_key) %>%
+  filter(n > 1)
+```
+
+
+## Collapsed
+
+```{r}
+fall_enrollment <- fall_enrollment %>%
+  group_by(unitid, date_key, time_status, career_level, degree_seeking, continuation_type, demographic_key) %>%
+  summarize(headcount = sum(headcount, na.rm = TRUE))
+```
+
+# Write to Database
+
+## Detail Table
+
+```{r}
+fall_enrollment %>%
+  write_db("ched-staging", "ipeds_fall_enrollment")
+```
+
