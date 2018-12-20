@@ -1,0 +1,186 @@
+---
+title: "Load IPEDS Charges by Academic Year"
+author: "Jason P. Casey"
+date: 2018-12-03
+output: html_notebook
+params:
+  read_raw:
+    label: "Read Raw"
+    value: "Y"
+  start_year:
+    label: "Start Year"
+    value: 2012
+  end_year:
+    label: "Ending Year"
+    value: 2017
+---
+
+# Setup
+
+Data setup:
+
+_read_raw_ parameter determines whether to do a data pull across the web.  This is costly, so only do so if new data need to be pulled.  Two options: Y or N.
+
+_start_year_ parameter determines the first year to be added.  Correspondingly,
+_end_year_ parameter sets the ending year.  Present values are based on the universe change in 2010 and the most recent year of available data.
+
+```{r setup}
+# knitr options
+knitr::opts_chunk$set(fig.width = 8,
+                      fig.asp = 0.618,
+                      echo = TRUE)
+knitr::knit_engines$set(python = reticulate::eng_python)
+
+# include user functions
+source(file="../user-functions.R")
+
+read_file <- function(year) {
+  occupational_category <- net_load_zip(str_c("https://nces.ed.gov/ipeds/datacenter/data/s", year, "_oc.zip"),
+                                        str_c("s", year, "_oc.csv")) %>%
+    mutate(unitid = as.integer(unitid),
+           facstat = ifelse(occupcat > 399, 60, 90),
+           facstat = ifelse(staffcat == 3210, 41, facstat),
+           facstat = ifelse(ftpt == 4, 55, facstat),
+           occupcat = ifelse(occupcat == 210,
+                             211,
+                             as.integer(occupcat)),
+           arank = -1,
+           source = "staff") %>%
+    filter(staffcat %in% c(2220, 2230, 2261, 2262, 2263, 2264, 2270,
+                           2300, 2310, 2320, 2330, 2340, 2350, 2360, 2370, 2380, 2390,
+                           3210, 3220, 3230, 3261, 3262, 3263, 3264, 3270, 
+                           3310, 3320, 3330, 3340, 3350, 3360, 3370, 3380, 3390,
+                           4410, 4420, 4430, 4440, 4450, 4460, 4470, 4480)) %>%
+    select(unitid, source, occupcat, facstat, arank, ftpt,
+           hrtotlt:hrnralw)
+  
+  instructional_staff <- net_load_zip(str_c("https://nces.ed.gov/ipeds/datacenter/data/s", year, "_is.zip"),
+                                      str_c("s", year, "_is.csv")) %>%
+    mutate(unitid = as.integer(unitid),
+           factstat = ifelse(facstat %in% c(20, 30, 41, 42, 43, 50, 60), as.integer(facstat), 0),
+           occupcat = ifelse(facstat %in% c(20, 30),
+                             215,
+                             211),
+           ftpt = 2,
+           source = "instructors") %>%
+    filter(facstat > 0,
+           siscat %in% c(201, 202, 203, 204, 205, 206, 
+                         301, 302, 303, 304, 305, 306, 
+                         411, 412, 413, 414, 415, 416, 
+                         421, 422, 423, 424, 425, 426,
+                         431, 432, 433, 434, 435, 436,
+                         500)) %>%
+    select(unitid, source, occupcat, facstat, arank, ftpt,
+           hrtotlt:hrnralw)
+  
+  occupational_category %>%
+    bind_rows(instructional_staff)
+}
+
+if (params$read_raw == "Y") {
+  staff_meta <- tibble(year = seq(params$start_year, params$end_year)) %>%
+    mutate(data = map(year, read_file))
+  
+  staff_raw <- staff_meta %>%
+    unnest()
+  
+  staff_raw %>%
+    write_db("ched-staging", "staff_raw")
+
+  rm(staff_meta, staff_raw)
+}
+
+```
+
+# Read Data
+
+```{r}
+system.time({
+  staff_raw <- read_db("ched-staging", "SELECT * FROM dbo.staff_raw")
+  })
+```
+
+# Merge Data Into Needed Tables
+
+## Detail Table
+
+This table contains the published charges by type: tuition, fees, books and supplies, room and board (on-campus), and other expenses.
+
+```{r}
+# charges <- staff_raw %>%
+#   gather(chg1at0, chg1at1, chg1at2, chg1at3,
+#          chg2at0, chg2at1, chg2at2, chg2at3,
+#          chg3at0, chg3at1, chg3at2, chg3at3,
+#          chg1af0, chg1af1, chg1af2, chg1af3,
+#          chg2af0, chg2af1, chg2af2, chg2af3,
+#          chg3af0, chg3af1, chg3af2, chg3af3,
+#          chg4ay0, chg4ay1, chg4ay2, chg4ay3,
+#          chg5ay0, chg5ay1, chg5ay2, chg5ay3,
+#          chg6ay0, chg6ay1, chg6ay2, chg6ay3, key = "variable", value = "charge") %>%
+#   separate(variable, c("chargex", "class", "index"), c(3, 6)) %>%
+#   mutate(unitid = as.integer(unitid),
+#          year_id = year + 1,
+#          index = 3 - as.integer(index),
+#          year = year_id - index,
+#          charge_type_id = recode(class,
+#                                  "1at" = 1,
+#                                  "2at" = 1,
+#                                  "3at" = 1,
+#                                  "1af" = 2,
+#                                  "2af" = 2,
+#                                  "3af" = 2,
+#                                  "4ay" = 3,
+#                                  "5ay" = 4,
+#                                  "6ay" = 5,
+#                                  .default = 0),
+#          charge_type = recode(class,
+#                                  "1at" = "Tuition",
+#                                  "2at" = "Tuition",
+#                                  "3at" = "Tuition",
+#                                  "1af" = "Fees",
+#                                  "2af" = "Fees",
+#                                  "3af" = "Fees",
+#                                  "4ay" = "Books and supplies",
+#                                  "5ay" = "On-campus room and board",
+#                                  "6ay" = "On-campus other expenses",
+#                                  .default = "Other"),
+#          student_residency = recode(class,
+#                                     "2at" = "In-state",
+#                                     "3at" = "Out-of-state",
+#                                     "2af" = "In-state",
+#                                     "3af" = "Out-of-state",
+#                                     .default = "In-district"),
+#          charge = as.numeric(charge)) %>%
+#   select(unitid, year_id, year, charge_type_id, charge_type, student_residency, charge)
+# 
+# instate <- charges %>%
+#   filter(charge_type_id > 2) %>%
+#   mutate(student_residency = "In-state")
+# 
+# outstate <- charges %>%
+#   filter(charge_type_id > 2) %>%
+#   mutate(student_residency = "Out-of-state")
+#   
+# charges <- charges %>%
+#   bind_rows(., instate, outstate)
+# 
+# charges <- charges %>%
+#   group_by(unitid, year) %>%
+#   summarize(year_id = max(year_id)) %>%
+#   ungroup() %>%
+#   semi_join(charges, .) %>%
+#   mutate(year_id = year) %>%
+#   select(unitid, year_id, student_residency, charge_type, charge)
+# 
+
+```
+
+# Write to Database
+
+## Detail Table
+
+```{r}
+charges %>%
+  write_db("ched-staging", "ipeds_fall_staff")
+```
+

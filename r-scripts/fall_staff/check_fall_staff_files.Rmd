@@ -1,0 +1,160 @@
+---
+title: "Check Fall Staff Notebook"
+date: 2018-12-18
+output: html_notebook
+params:
+  year:
+    label: "Year (Fall)"
+    value: 2017
+---
+
+# Setup
+
+```{r setup}
+# knitr options
+knitr::opts_chunk$set(fig.width = 8,
+                      fig.asp = 0.618,
+                      echo = TRUE)
+knitr::knit_engines$set(python = reticulate::eng_python)
+
+library(DBI)
+library(odbc)
+library(readxl)
+library(lubridate)
+library(kableExtra)
+library(tidyverse)
+
+# access zipped data via net
+net_load_zip <- function(file_url, file_name)
+{
+  #Download data file
+  temp <- tempfile()
+  
+  download.file(file_url,
+                temp)
+  
+  files <- unzip(temp, list = TRUE)
+
+  spec <- files$Name[str_detect(files$Name, "_rv")]
+
+  file_name <- ifelse(length(spec) == 0, file_name, spec)
+  
+  data <- read_csv(unz(temp, file_name),
+                   locale = locale(encoding = "latin1")) %>%
+    rename_all(tolower)
+  
+  unlink(temp)
+  rm(temp)
+  
+  return(data)
+}
+
+read_file <- function(url, file) {
+  df <- net_load_zip(url, file)
+  
+  drop_fields <- df %>%
+    select(starts_with("x")) %>%
+    colnames(.)
+
+df %>%
+  select(-drop_fields)
+
+}
+
+occupational_category <- read_file(str_c("https://nces.ed.gov/ipeds/datacenter/data/s", params$year, "_oc.zip"),
+                                   str_c("s", params$year, "_oc.csv")) %>%
+  mutate(unitid = as.integer(unitid),
+         facstat = ifelse(occupcat > 399, 60, 90),
+         facstat = ifelse(staffcat == 3210, 41, facstat),
+         facstat = ifelse(ftpt == 4, 55, facstat),
+         occupcat = ifelse(occupcat == 210,
+                           211,
+                           as.integer(occupcat)),
+         faculty_rank = "Unknown",
+         source = "staff",
+         time_status = recode(ftpt,
+                              `2` = "Full-time",
+                              .default = "Part-time")) %>%
+  filter(ftpt > 1,
+         staffcat %in% c(2220, 2230, 2261, 2262, 2263, 2264, 2270,
+                         2300, 2310, 2320, 2330, 2340, 2350, 2360, 2370, 2380, 2390,
+                         3210, 3220, 3230, 3261, 3262, 3263, 3264, 3270, 
+                         3310, 3320, 3330, 3340, 3350, 3360, 3370, 3380, 3390,
+                         4410, 4420, 4430, 4440, 4450, 4460, 4470, 4480)) %>%
+  select(unitid, source, occupcat, facstat, faculty_rank, time_status,
+         hrnralm, hrnralw, hrunknm, hrunknw, hrhispm, hrhispw,
+         hraianm, hraianw, hrasiam, hrasiaw, hrbkaam, hrbkaaw,
+         hrnhpim, hrnhpiw, hrwhitm, hrwhitw, hr2morm, hr2morw)
+
+instructional_staff <- read_file(str_c("https://nces.ed.gov/ipeds/datacenter/data/s", params$year, "_is.zip"),
+                                 str_c("s", params$year, "_is.csv")) %>%
+  mutate(unitid = as.integer(unitid),
+         factstat = ifelse(facstat %in% c(20, 30, 41, 42, 43, 50, 60), as.integer(facstat), 0),
+         occupcat = ifelse(facstat %in% c(20, 30),
+                           215,
+                           211),
+         time_status = "Full-time",
+         faculty_rank = recode(arank,
+                               `1` = "Professors",
+                               `2` = "Associate Professors",
+                               `3` = "Assistant Professors",
+                               `4` = "Instructors",
+                               `5` = "Lecturers",
+                               `6` = "Without Faculty Status",
+                               .default = "Unknown"),
+         source = "instructors") %>%
+  filter(facstat > 0,
+         siscat %in% c(201, 202, 203, 204, 205, 206, 
+                       301, 302, 303, 304, 305, 306, 
+                       411, 412, 413, 414, 415, 416, 
+                       421, 422, 423, 424, 425, 426,
+                       431, 432, 433, 434, 435, 436,
+                       500)) %>%
+  select(unitid, source, occupcat, facstat, faculty_rank, time_status,
+         hrnralm, hrnralw, hrunknm, hrunknw, hrhispm, hrhispw,
+         hraianm, hraianw, hrasiam, hrasiaw, hrbkaam, hrbkaaw,
+         hrnhpim, hrnhpiw, hrwhitm, hrwhitw, hr2morm, hr2morw)
+
+
+```
+
+# Inspect Contents
+
+## Occupational Categories
+
+```{r}
+occupational_category
+```
+
+## Instructional Staff
+
+```{r}
+instructional_staff
+```
+
+## Fall Staff
+
+```{r}
+fall_staff <- occupational_category %>%
+  bind_rows(instructional_staff) %>%
+  gather(hrnralm:hr2morw, key = "variable", value = "headcount") %>%
+  separate(variable, c("survey", "ethnicity", "sex"), sep = c(-5, -1)) %>%
+  mutate(sex = recode(sex,
+                      "m" = "Men",
+                      "w" = "Women",
+                      .default = "Unknown"),
+         ethnicity = recode(ethnicity,
+                            "nral" = "Non-resident Alien",
+                            "aian" = "American Indian or Alaska Native",
+                            "asia" = "Asian",
+                            "bkaa" = "Black or African American",
+                            "hisp" = "Hispanic",
+                            "nhpi" = "Native Hawaiian or Other Pacific Islander",
+                            "whit" = "White",
+                            "2mor" = "Two or More Races",
+                            .default = "Unknown")) %>%
+  select(-survey)
+
+fall_staff
+```
+
