@@ -6,7 +6,7 @@ output: html_notebook
 params:
   read_raw:
     label: "Read Raw"
-    value: "Y"
+    value: "N"
   start_year:
     label: "Start Year"
     value: 2012
@@ -34,54 +34,29 @@ knitr::knit_engines$set(python = reticulate::eng_python)
 # include user functions
 source(file="../user-functions.R")
 
-read_file <- function(year) {
-  occupational_category <- net_load_zip(str_c("https://nces.ed.gov/ipeds/datacenter/data/s", year, "_oc.zip"),
-                                        str_c("s", year, "_oc.csv")) %>%
-    mutate(unitid = as.integer(unitid),
-           facstat = ifelse(occupcat > 399, 60, 90),
-           facstat = ifelse(staffcat == 3210, 41, facstat),
-           facstat = ifelse(ftpt == 4, 55, facstat),
-           occupcat = ifelse(occupcat == 210,
-                             211,
-                             as.integer(occupcat)),
-           arank = -1,
-           source = "staff") %>%
-    filter(staffcat %in% c(2220, 2230, 2261, 2262, 2263, 2264, 2270,
-                           2300, 2310, 2320, 2330, 2340, 2350, 2360, 2370, 2380, 2390,
-                           3210, 3220, 3230, 3261, 3262, 3263, 3264, 3270, 
-                           3310, 3320, 3330, 3340, 3350, 3360, 3370, 3380, 3390,
-                           4410, 4420, 4430, 4440, 4450, 4460, 4470, 4480)) %>%
-    select(unitid, source, occupcat, facstat, arank, ftpt,
-           hrtotlt:hrnralw)
+read_file <- function(url, file) {
+  df <- net_load_zip(url, file)
   
-  instructional_staff <- net_load_zip(str_c("https://nces.ed.gov/ipeds/datacenter/data/s", year, "_is.zip"),
-                                      str_c("s", year, "_is.csv")) %>%
-    mutate(unitid = as.integer(unitid),
-           factstat = ifelse(facstat %in% c(20, 30, 41, 42, 43, 50, 60), as.integer(facstat), 0),
-           occupcat = ifelse(facstat %in% c(20, 30),
-                             215,
-                             211),
-           ftpt = 2,
-           source = "instructors") %>%
-    filter(facstat > 0,
-           siscat %in% c(201, 202, 203, 204, 205, 206, 
-                         301, 302, 303, 304, 305, 306, 
-                         411, 412, 413, 414, 415, 416, 
-                         421, 422, 423, 424, 425, 426,
-                         431, 432, 433, 434, 435, 436,
-                         500)) %>%
-    select(unitid, source, occupcat, facstat, arank, ftpt,
-           hrtotlt:hrnralw)
-  
-  occupational_category %>%
-    bind_rows(instructional_staff)
+  df %>%
+    select(unitid, occupcat, staffcat, ftpt,
+           hrnralm, hrnralw, hrunknm, hrunknw, hrhispm, hrhispw,
+           hraianm, hraianw, hrasiam, hrasiaw, hrbkaam, hrbkaaw,
+           hrnhpim, hrnhpiw, hrwhitm, hrwhitw, hr2morm, hr2morw)
+
 }
+
+# https://nces.ed.gov/ipeds/datacenter/data/EAP2017.zip
 
 if (params$read_raw == "Y") {
   staff_meta <- tibble(year = seq(params$start_year, params$end_year)) %>%
-    mutate(data = map(year, read_file))
-  
+  mutate(url = str_c("https://nces.ed.gov/ipeds/datacenter/data/s", year, "_oc.zip"),
+         file_name = str_c("s", year, "_oc.csv"),
+         data = map2(url,
+                     file_name,
+                     read_file))
+
   staff_raw <- staff_meta %>%
+    select(year, data) %>%
     unnest()
   
   staff_raw %>%
@@ -100,87 +75,97 @@ system.time({
   })
 ```
 
-# Merge Data Into Needed Tables
+# Build Tables
 
-## Detail Table
-
-This table contains the published charges by type: tuition, fees, books and supplies, room and board (on-campus), and other expenses.
+## Fall Staff
 
 ```{r}
-# charges <- staff_raw %>%
-#   gather(chg1at0, chg1at1, chg1at2, chg1at3,
-#          chg2at0, chg2at1, chg2at2, chg2at3,
-#          chg3at0, chg3at1, chg3at2, chg3at3,
-#          chg1af0, chg1af1, chg1af2, chg1af3,
-#          chg2af0, chg2af1, chg2af2, chg2af3,
-#          chg3af0, chg3af1, chg3af2, chg3af3,
-#          chg4ay0, chg4ay1, chg4ay2, chg4ay3,
-#          chg5ay0, chg5ay1, chg5ay2, chg5ay3,
-#          chg6ay0, chg6ay1, chg6ay2, chg6ay3, key = "variable", value = "charge") %>%
-#   separate(variable, c("chargex", "class", "index"), c(3, 6)) %>%
-#   mutate(unitid = as.integer(unitid),
-#          year_id = year + 1,
-#          index = 3 - as.integer(index),
-#          year = year_id - index,
-#          charge_type_id = recode(class,
-#                                  "1at" = 1,
-#                                  "2at" = 1,
-#                                  "3at" = 1,
-#                                  "1af" = 2,
-#                                  "2af" = 2,
-#                                  "3af" = 2,
-#                                  "4ay" = 3,
-#                                  "5ay" = 4,
-#                                  "6ay" = 5,
-#                                  .default = 0),
-#          charge_type = recode(class,
-#                                  "1at" = "Tuition",
-#                                  "2at" = "Tuition",
-#                                  "3at" = "Tuition",
-#                                  "1af" = "Fees",
-#                                  "2af" = "Fees",
-#                                  "3af" = "Fees",
-#                                  "4ay" = "Books and supplies",
-#                                  "5ay" = "On-campus room and board",
-#                                  "6ay" = "On-campus other expenses",
-#                                  .default = "Other"),
-#          student_residency = recode(class,
-#                                     "2at" = "In-state",
-#                                     "3at" = "Out-of-state",
-#                                     "2af" = "In-state",
-#                                     "3af" = "Out-of-state",
-#                                     .default = "In-district"),
-#          charge = as.numeric(charge)) %>%
-#   select(unitid, year_id, year, charge_type_id, charge_type, student_residency, charge)
-# 
-# instate <- charges %>%
-#   filter(charge_type_id > 2) %>%
-#   mutate(student_residency = "In-state")
-# 
-# outstate <- charges %>%
-#   filter(charge_type_id > 2) %>%
-#   mutate(student_residency = "Out-of-state")
-#   
-# charges <- charges %>%
-#   bind_rows(., instate, outstate)
-# 
-# charges <- charges %>%
-#   group_by(unitid, year) %>%
-#   summarize(year_id = max(year_id)) %>%
-#   ungroup() %>%
-#   semi_join(charges, .) %>%
-#   mutate(year_id = year) %>%
-#   select(unitid, year_id, student_residency, charge_type, charge)
-# 
+fall_staff <- staff_raw %>%
+  filter(ftpt > 1,
+         staffcat %in% c(2210, 2220, 2230, 2261, 2262, 2263, 2264, 2270,
+                         2300, 2310, 2320, 2330, 2340, 2350, 2360, 2370, 2380, 2390,
+                         3210, 3220, 3230, 3261, 3262, 3263, 3264, 3270, 
+                         3300, 3310, 3320, 3330, 3340, 3350, 3360, 3370, 3380, 3390,
+                         4410, 4420, 4430, 4440, 4450, 4460, 4470, 4480, 4490)) %>%
+  gather(hrnralm:hr2morw, key = "variable", value = "headcount") %>%
+  separate(variable, c("survey", "demographic_key"), sep = c(2)) %>%
+  mutate(unitid = as.integer(unitid),
+         occupcat = ifelse(occupcat == 210,
+                           211,
+                           as.integer(occupcat)),
+         time_status_id = recode(ftpt,
+                              `2` = "FT",
+                              .default = "PT"),
+         time_status = recode(ftpt,
+                              `2` = "Full-time",
+                              .default = "Part-time"),
+         date_key = (year * 10000) + 1101,
+         employee_key = str_c(occupcat, time_status_id),
+         staff_raw = recode(occupcat,
+                                        `211` = "Instructional staff, primarily instruction",
+                                        `212` = "Instructional staff, primarily instruction, exclusively credit",
+                                        `213` = "Instructional staff, primarily instruction, exclusively not-for-credit",
+                                        `214` = "Instructional staff, primarily instruction, combined credit/not-for-credit",
+                                        `215` = "Instructional staff - Instruction/research/public service",
+                                        `220` = "Research",
+                                        `230` = "Public service",
+                                        `250` = "Librarians, Curators, Archivists and other teaching Instructional support",
+                                        `260` = "Librarians, Curators, and Archivists",
+                                        `261` = "Archivists, Curators, and Museum Technicians",
+                                        `262` = "Librarians",
+                                        `263` = "Library Technicians",
+                                        `264` = "Detailed library occupations not available for non-degree-granting institutions",
+                                        `270` = "Other teaching and Instructional Support",
+                                        `300` = "Management",
+                                        `310` = "Business and Financial Operations",
+                                        `320` = "Computer, Engineering, and Science",
+                                        `330` = "Community Service, Legal, Arts, and Media",
+                                        `340` = "Healthcare Practioners and Technical",
+                                        `350` = "Service Occupations",
+                                        `360` = "Sales and Related Occupations",
+                                        `370` = "Office and Administrative Support",
+                                        `380` = "Natural Resources, Construction, and Maintenance",
+                                        `390` = "Production, Transportation, and Material Moving",
+                                        `400` = "Graduate Assistants",
+                                        `410` = "Graduate Assistants Teaching",
+                                        `420` = "Graduate Assistants Research",
+                                        `430` = "Graduate Assistants Management Occupations",
+                                        `440` = "Graduate Assistants Business and Financial Operations Occupations",
+                                        `450` = "Graduate Assistants Computer, Engineering, and Science Occupations",
+                                        `460` = "Graduate Assistants Community Service, Legal, Arts, and Media",
+                                        `470` = "Graduate Assistants Library and Instructional support",
+                                        `480` = "Graduate Assistants Healthcare Practioners and Technical",
+                                        .default = "Unknown")) %>%
+  select(unitid, date_key, employee_key, occupcat, staff_raw,
+         time_status, demographic_key, headcount)
 
+fall_staff
 ```
 
-# Write to Database
-
-## Detail Table
+## Employee Dimension Table
 
 ```{r}
-charges %>%
+staff_dim <- fall_staff %>%
+  count(employee_key, staff_raw, time_status) %>%
+  select(-n)
+
+staff_dim
+```
+
+# Write Data
+
+## Fall Staff
+
+```{r}
+fall_staff %>%
+  select(unitid, date_key, employee_key, demographic_key, headcount) %>%
   write_db("ched-staging", "ipeds_fall_staff")
+```
+
+## Employee Dimension
+
+```{r}
+staff_dim %>%
+  write_db("ched-staging", "staff_codes")
 ```
 
