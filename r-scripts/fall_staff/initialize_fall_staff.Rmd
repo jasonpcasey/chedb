@@ -60,7 +60,7 @@ if (params$read_raw == "Y") {
     unnest()
   
   staff_raw %>%
-    write_db("ched-staging", "staff_raw")
+    write_db("ched-dev", "staff_raw")
 
   rm(staff_meta, staff_raw)
 }
@@ -71,7 +71,7 @@ if (params$read_raw == "Y") {
 
 ```{r}
 system.time({
-  staff_raw <- read_db("ched-staging", "SELECT * FROM dbo.staff_raw")
+  staff_raw <- read_db("ched-dev", "SELECT * FROM dbo.staff_raw")
   })
 ```
 
@@ -159,13 +159,13 @@ staff_dim
 ```{r}
 fall_staff %>%
   select(unitid, date_key, employee_key, demographic_key, headcount) %>%
-  write_db("ched-staging", "ipeds_fall_staff")
+  write_db("ched-dev", "ipeds_fall_staff")
 ```
 
 ## Employee Dimension
 
 ```{r}
 staff_dim %>%
-  write_db("ched-staging", "staff_codes")
+  write_db("ched-dev", "staff_codes")
 ```
 
