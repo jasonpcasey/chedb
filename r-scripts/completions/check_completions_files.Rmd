@@ -9,6 +9,8 @@ params:
     value: 2008
 ---
 
+# Setup
+
 ```{r setup}
 # knitr options
 knitr::opts_chunk$set(fig.width = 8,
@@ -152,6 +154,7 @@ degree_completions <- c_raw %>%
                                .default = "Unknown")) %>%
   select(unitid, date_key, degree_key, cipcode, award_level, major_number, cnralm:c2morw) %>%
   gather(cnralm:c2morw, key = "variable", value = "awards") %>%
+  filter(!is.na(awards)) %>%
   separate(variable, c("survey", "demographic_key"), sep = c(1)) %>%
   select(-survey)
 
@@ -182,14 +185,19 @@ degree_completions %>%
 
 ## Dimension Table
 
+~~~
+"ched-staging"
+~~~
+
 ```{r}
 degree_dim %>%
-  write_db("ched-staging", "ipeds_degree_dimension")
+  insert_db("ched-dev", "ipeds_degree_dimension")
 ```
 
 ## Data Table
 
 ```{r}
 degree_completions %>%
-  write_db("ched-staging", "ipeds_degree_completions")
+  select(unitid, date_key, degree_key, cipcode, demographic_key, awards) %>%
+  insert_db("ched-dev", "ipeds_degree_completions")
 ```
