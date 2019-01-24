@@ -191,7 +191,7 @@ degree_completions %>%
 
 ```{r}
 degree_dim %>%
-  insert_db("ched-dev", "ipeds_degree_dimension")
+  insert_db("ched-staging", "ipeds_degree_dimension")
 ```
 
 ## Data Table
@@ -199,5 +199,5 @@ degree_dim %>%
 ```{r}
 degree_completions %>%
   select(unitid, date_key, degree_key, cipcode, demographic_key, awards) %>%
-  insert_db("ched-dev", "ipeds_degree_completions")
+  insert_db("ched-staging", "ipeds_degree_completions")
 ```

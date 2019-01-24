@@ -1,7 +1,7 @@
 # parameters
 start_year <- 2000
 end_year <- 2017
-db_string <- "ched-dev"
+db_string <- "ched-staging"
 
 # include user functions
 source(file="r-scripts/user-functions.R")
