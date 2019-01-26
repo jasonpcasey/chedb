@@ -10,7 +10,7 @@ library(tidyverse)
 net_load <- function(file_url)
 {
   read_csv(file_url,
-                   locale = locale(encoding = "latin1")) %>%
+           locale = locale(encoding = "latin1")) %>%
     rename_all(tolower)
 }
 
