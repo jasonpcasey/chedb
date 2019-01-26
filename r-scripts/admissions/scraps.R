@@ -1,0 +1,7 @@
+applcn = ifelse(applcn==0, applcnm + applcnw, applcn),
+admssn = ifelse(admssn==0, admssnm + admssnw, admssn),
+enrlm = ifelse(enrlm==0, enrlftm + enrlptm, enrlm),
+enrlw = ifelse(enrlw==0, enrlftw + enrlptw, enrlw),
+enrlt = ifelse(enrlt==0, enrlm + enrlw, enrlt),
+enrlft = ifelse(enrlft==0, enrlftm + enrlftw, enrlft),
+enrlpt = ifelse(enrlpt==0, enrlptm + enrlptw, enrlpt),
