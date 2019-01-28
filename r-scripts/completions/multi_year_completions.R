@@ -1,5 +1,5 @@
 # parameters
-start_year <- 2000
+start_year <- 2012  # 2000
 end_year <- 2017
 db_string <- "ched-staging"
 
@@ -125,8 +125,10 @@ read_file <- function(year, file_name) {
            cwhitw, c2morm, c2morw)
 }
 
+awards <- tibble()
+
 for (year in start_year:end_year) {
-  read_file(year, str_c("c", year, "_a.csv")) %>%
+  temp <- read_file(year, str_c("c", year, "_a.csv")) %>%
     mutate(date_key = (year * 10000) + 630,
            degree_key = str_c(str_pad(awlevel, 2, pad="0"), majornum),
            award_level = recode(awlevel,
@@ -149,12 +151,22 @@ for (year in start_year:end_year) {
                                  `1` = "First Major",
                                  `2` = "Second Major",
                                  .default = "Unknown")) %>%
-    select(unitid, date_key, degree_key, cipcode, award_level, major_number, cnralm:c2morw) %>%
+    select(unitid, date_key, degree_key, cipcode, award_level, major_number, cnralm:c2morw)
+  
+  temp %>%
     gather(cnralm:c2morw, key = "variable", value = "awards") %>%
     filter(!is.na(awards)) %>%
     separate(variable, c("survey", "demographic_key"), sep = c(1)) %>%
     select(unitid, date_key, degree_key, cipcode, demographic_key, awards) %>%
     insert_db(db_string, "ipeds_degree_completions")
+  
+  awards <- temp %>%
+    count(degree_key, award_level, major_number) %>%
+    select(-n) %>%
+    bind_rows(awards)
 }
 
-
+awards %>%
+  count(degree_key, award_level, major_number) %>%
+  select(-n) %>%
+  insert_db(db_string, "ipeds_degree_types")
