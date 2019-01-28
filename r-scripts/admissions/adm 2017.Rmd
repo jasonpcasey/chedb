@@ -235,13 +235,13 @@ scores <- adm_raw %>%
 
 ```{r}
 adm %>%
-  write_db("ched-staging", "ipeds_admissions")
+  insert_db("ched-staging", "ipeds_admissions")
 ```
 
 ## Test Scores Tables
 
 ```{r}
 scores %>%
-  write_db("ched-staging", "ipeds_test_scores")
+  insert_db("ched-staging", "ipeds_test_scores")
 ```
 
