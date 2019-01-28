@@ -159,7 +159,7 @@ if (params$read_raw == "Y") {
 
 ```{r}
 system.time({
-  ef_raw <- read_db("ched-staging", "SELECT * FROM dbo.ef_raw")
+  ef_raw <- read_db("ched-dev", "SELECT * FROM dbo.ef_raw")
   })
 ```
 

@@ -21,8 +21,8 @@ knitr::knit_engines$set(python = reticulate::eng_python)
 # include user functions
 source(file="../user-functions.R")
 
-aaude_inst <- grabData('aaude', "SELECT * FROM WAREUSER.INSTITUTION") %>%
-  select(-warehouse_load_date)
+aaude_inst <- read_aaude_data('aaude', "SELECT * FROM WAREUSER.INSTITUTION") # %>%
+  # select(-warehouse_load_date)
 
 aaude_inst
 ```
@@ -31,11 +31,12 @@ aaude_inst
 
 ```{r}
 system.time({
-  institutions %>%
+  aaude_inst %>%
+    rename_all(tolower) %>%
     filter(is_aau_institution == "Y") %>%
     select(unitid = unit_id,
            inst_name) %>%
-    write_db("ched-staging", "aau_membership", add = FALSE)
+    write_db("ched-dev", "aau_membership")
 })
 
 
