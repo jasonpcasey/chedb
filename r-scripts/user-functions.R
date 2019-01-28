@@ -74,7 +74,8 @@ insert_db <- function(frame, db, tab) {
   answer <- system.time({ dbWriteTable(con,
                                        tab,
                                        frame,
-                                       append = TRUE
+                                       append = TRUE,
+                                       overwrite = FALSE
   ) })
   
   dbDisconnect(con)
@@ -82,7 +83,7 @@ insert_db <- function(frame, db, tab) {
   return(answer)
 }
 
-read_aaude_data <- function(dbString, queryString)
+read_aaude_data <- function(dbString, query_string)
 {
   # Open a connection
   connection <- dbConnect(odbc::odbc(),
@@ -90,10 +91,10 @@ read_aaude_data <- function(dbString, queryString)
                           UID=rstudioapi::showPrompt('User ID','Enter User ID'),
                           PWD=rstudioapi::askForPassword("Database Password"))
   
-  tbl <- dbReadTable(connection, tab) %>%
+  response <- dbSendQuery(connection, query_string)
+  tbl <- dbFetch(response) %>%
     rename_all(tolower)
-  
-  # dbClearResult(response)
+  dbClearResult(response)
   
   # disconnect from the database
   dbDisconnect(connection)
