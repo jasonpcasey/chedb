@@ -155,7 +155,9 @@ for (year in start_year:end_year) {
   
   temp %>%
     gather(cnralm:c2morw, key = "variable", value = "awards") %>%
-    filter(!is.na(awards)) %>%
+    filter(!is.na(awards),
+           awards > 0,
+           as.numeric(cipcode) < 99) %>%
     separate(variable, c("survey", "demographic_key"), sep = c(1)) %>%
     select(unitid, date_key, degree_key, cipcode, demographic_key, awards) %>%
     insert_db(db_string, "ipeds_degree_completions")
