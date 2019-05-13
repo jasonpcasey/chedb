@@ -68,6 +68,21 @@ write_db <- function(frame, db, tab) {
   return(answer)
 }
 
+append_db <- function(frame, db, tab) {
+  con <- dbConnect(odbc::odbc(), db)
+  
+  answer <- system.time({ dbWriteTable(con,
+                                       tab,
+                                       frame,
+                                       overwrite = FALSE,
+                                       append = TRUE
+  ) })
+  
+  dbDisconnect(con)
+  
+  return(answer)
+}
+
 insert_db <- function(frame, db, tab) {
   con <- dbConnect(odbc::odbc(), db)
   
