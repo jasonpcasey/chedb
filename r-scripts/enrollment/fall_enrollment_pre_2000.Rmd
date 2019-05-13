@@ -90,7 +90,7 @@ read_file <- function(url, file_name) {
            efwhitw = as.integer(efrace12),
            ef2morm = 0,
            ef2morw = 0) %>%
-    filter(efalevel %in% c(24, 25, 31, 32, 36, 44, 45, 51, 52, 56))
+    filter(efalevel %in% c(24, 25, 31, 32, 36, 39, 40, 44, 45, 51, 52, 56, 59, 60))
   
   recordset %>%
     select(unitid, efalevel,
@@ -123,13 +123,6 @@ if (params$read_raw == "Y") {
 system.time({
   ef_raw <- read_db("ched-staging", "SELECT * FROM dbo.ef_raw")
   })
-```
-
-
-```{r}
-ef_raw %>%
-  filter(year == 1998) %>%
-  count(year, efalevel)
 ```
 
 # Merge Data Into Needed Tables
@@ -180,8 +173,6 @@ fall_enrollment <- ef_raw %>%
   gather(efnralm:ef2morw, key = "variable", value = "headcount") %>%
   separate(variable, c("survey", "demographic_key"), sep = c(2)) %>%
   select(-survey)
-
-# c(24, 25, 31, 32, 36, 44, 45, 51, 52, 56)
 
 fall_enrollment %>%
   filter(unitid == 181464,
