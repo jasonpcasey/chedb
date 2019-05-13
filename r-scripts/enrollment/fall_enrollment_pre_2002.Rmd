@@ -6,13 +6,13 @@ output: html_notebook
 params:
   read_raw:
     label: "Read Raw"
-    value: "N"
+    value: "Y"
   start_year:
     label: "Start Year"
     value: 1998
   end_year:
     label: "Ending Year"
-    value: 2002
+    value: 2001
 ---
 
 # Setup
@@ -34,101 +34,55 @@ knitr::knit_engines$set(python = reticulate::eng_python)
 # include user functions
 source(file="../user-functions.R")
 
-read_file <- function(year, file_name) {
-  url <- str_c("https://nces.ed.gov/ipeds/datacenter/data/ef", year, "a.zip")
-  
+ef_meta <- tibble(year = c(1998, 1999, 2000, 2001),
+                  url = c("https://nces.ed.gov/ipeds/datacenter/data/ef2001a.zip",
+                          "https://nces.ed.gov/ipeds/datacenter/data/ef2000a.zip",
+                          "https://nces.ed.gov/ipeds/datacenter/data/ef99_anr.zip",
+                          "https://nces.ed.gov/ipeds/datacenter/data/ef98_anr.zip"),
+                  file_name = c("ef2001a.csv",
+                                "ef2000a.csv",
+                                "ef99_anr.csv",
+                                "ef98_anr.csv"))
+
+read_file <- function(url, file_name) {
+
   recordset <- net_load_zip(url, file_name) %>%
     mutate(unitid = as.integer(unitid))
   
-  if (year < 2008) {
-    recordset <- recordset %>%
-      filter(efalevel %in% c(24, 25, 31, 32, 36, 44, 45, 51, 52, 56)) %>%
-      mutate(efnralm = as.integer(efrace01),
-             efnralw = as.integer(efrace02),
-             efunknm = as.integer(efrace13),
-             efunknw = as.integer(efrace14),
-             efhispm = as.integer(efrace09),
-             efhispw = as.integer(efrace10),
-             efaianm = as.integer(efrace05),
-             efaianw = as.integer(efrace06),
-             efasiam = as.integer(efrace07),
-             efasiaw = as.integer(efrace08),
-             efbkaam = as.integer(efrace03),
-             efbkaaw = as.integer(efrace04),
-             efnhpim = 0,
-             efnhpiw = 0,
-             efwhitm = as.integer(efrace11),
-             efwhitw = as.integer(efrace12),
-             ef2morm = 0,
-             ef2morw = 0)
-      
-  }
+  recordset <- recordset %>%
+    mutate(line = as.integer(line),
+           efalevel = recode(line,
+                             `1` = 24,
+                             `3` = 25,
+                             `7` = 31,
+                             `11` = 32,
+                             `9` = 36,
+                             `15` = 44,
+                             `17` = 45,
+                             `21` = 51,
+                             `25` = 52,
+                             `23` = 56,
+                             .default = 99),
+           efnralm = as.integer(efrace01),
+           efnralw = as.integer(efrace02),
+           efunknm = as.integer(efrace13),
+           efunknw = as.integer(efrace14),
+           efhispm = as.integer(efrace09),
+           efhispw = as.integer(efrace10),
+           efaianm = as.integer(efrace05),
+           efaianw = as.integer(efrace06),
+           efasiam = as.integer(efrace07),
+           efasiaw = as.integer(efrace08),
+           efbkaam = as.integer(efrace03),
+           efbkaaw = as.integer(efrace04),
+           efnhpim = 0,
+           efnhpiw = 0,
+           efwhitm = as.integer(efrace11),
+           efwhitw = as.integer(efrace12),
+           ef2morm = 0,
+           ef2morw = 0) %>%
+    filter(efalevel %in% c(24, 25, 31, 32, 36, 44, 45, 51, 52, 56))
   
-    if (year == 2008) {
-      recordset <- recordset %>%
-        filter(efalevel %in% c(24, 25, 31, 32, 36, 44, 45, 51, 52, 56)) %>%
-        mutate(efnralm = as.integer(efnralm),
-               efnralw = as.integer(efnralw),
-               efunknm = as.integer(efunknm),
-               efunknw = as.integer(efunknw),
-               efhispm = as.integer(dvefhsm),
-               efhispw = as.integer(dvefhsw),
-               efaianm = as.integer(dvefaim),
-               efaianw = as.integer(dvefaiw),
-               efasiam = as.integer(dvefapm),
-               efasiaw = as.integer(dvefapw),
-               efbkaam = as.integer(dvefbkm),
-               efbkaaw = as.integer(dvefbkw),
-               efnhpim = 0,
-               efnhpiw = 0,
-               efwhitm = as.integer(dvefwhm),
-               efwhitw = as.integer(dvefwhw))
-    }
-  
-    if (year == 2009) {
-      recordset <- recordset %>%
-        filter(efalevel %in% c(24, 31, 32, 39, 40, 44, 51, 52, 59, 60)) %>%
-        mutate(efnralm = as.integer(efnralm),
-               efnralw = as.integer(efnralw),
-               efunknm = as.integer(efunknm),
-               efunknw = as.integer(efunknw),
-               efhispm = as.integer(dvefhsm),
-               efhispw = as.integer(dvefhsw),
-               efaianm = as.integer(dvefaim),
-               efaianw = as.integer(dvefaiw),
-               efasiam = as.integer(dvefapm),
-               efasiaw = as.integer(dvefapw),
-               efbkaam = as.integer(dvefbkm),
-               efbkaaw = as.integer(dvefbkw),
-               efnhpim = 0,
-               efnhpiw = 0,
-               efwhitm = as.integer(dvefwhm),
-               efwhitw = as.integer(dvefwhw))
-    }
-  
-    if (year > 2009) {
-      recordset <- recordset %>%
-        filter(efalevel %in% c(24, 31, 32, 39, 40, 44, 51, 52, 59, 60)) %>%
-        mutate(efnralm = as.integer(efnralm),
-               efnralw = as.integer(efnralw),
-               efunknm = as.integer(efunknm),
-               efunknw = as.integer(efunknw),
-               efhispm = as.integer(efhispm),
-               efhispw = as.integer(efhispw),
-               efaianm = as.integer(efaianm),
-               efaianw = as.integer(efaianw),
-               efasiam = as.integer(efasiam),
-               efasiaw = as.integer(efasiaw),
-               efbkaam = as.integer(efbkaam),
-               efbkaaw = as.integer(efbkaaw),
-               efnhpim = as.integer(efnhpim),
-               efnhpiw = as.integer(efnhpiw),
-               efwhitm = as.integer(efwhitm),
-               efwhitw = as.integer(efwhitw),
-               ef2morm = as.integer(ef2morm),
-               ef2morw = as.integer(ef2morw))
-    }
-
   recordset %>%
     select(unitid, efalevel,
            efnralm, efnralw, efunknm, efunknw, efhispm,
@@ -137,11 +91,10 @@ read_file <- function(year, file_name) {
            efwhitw, ef2morm, ef2morw)
 }
 
+
 if (params$read_raw == "Y") {
-  ef_meta <- tibble(year = seq(params$start_year, params$end_year)) %>%
-    mutate(url = str_c("https://nces.ed.gov/ipeds/datacenter/data/ef", year, "a.zip"),
-           file_name = str_c("ef", year, "a.csv"),
-           data = map2(year, file_name, read_file))
+  ef_meta <- ef_meta %>%
+    mutate(data = map2(url, file_name, read_file))
   
   ef_raw <- ef_meta %>%
     select(year, data) %>%
@@ -159,8 +112,15 @@ if (params$read_raw == "Y") {
 
 ```{r}
 system.time({
-  ef_raw <- read_db("ched-dev", "SELECT * FROM dbo.ef_raw")
+  ef_raw <- read_db("ched-staging", "SELECT * FROM dbo.ef_raw")
   })
+```
+
+
+```{r}
+ef_raw %>%
+  filter(year == 2001) %>%
+  count(year, efalevel)
 ```
 
 # Merge Data Into Needed Tables
@@ -212,16 +172,20 @@ fall_enrollment <- ef_raw %>%
   separate(variable, c("survey", "demographic_key"), sep = c(2)) %>%
   select(-survey)
 
+# c(24, 25, 31, 32, 36, 44, 45, 51, 52, 56)
+
 fall_enrollment %>%
   filter(unitid == 181464,
-         date_key == 20171015)
+         date_key == 20011015)
 ```
 
 ## Check for Dupes
 
 ```{r}
 fall_enrollment %>%
-  count(unitid, date_key, time_status, career_level, degree_seeking, continuation_type, demographic_key) %>%
+  group_by(unitid, date_key, time_status, career_level, degree_seeking, continuation_type, demographic_key) %>%
+  summarize(headcount = sum(headcount, na.rm = TRUE),
+            n = n()) %>%
   filter(n > 1)
 ```
 
@@ -239,7 +203,9 @@ fall_enrollment <- fall_enrollment %>%
 ## Detail Table
 
 ```{r}
-fall_enrollment %>%
-  write_db("ched-staging", "ipeds_fall_enrollment")
+system.time({
+  fall_enrollment %>%
+    append_db("ched-staging", "ipeds_fall_enrollment")
+})
 ```
 
