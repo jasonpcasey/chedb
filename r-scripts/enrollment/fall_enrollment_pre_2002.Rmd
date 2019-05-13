@@ -34,15 +34,11 @@ knitr::knit_engines$set(python = reticulate::eng_python)
 # include user functions
 source(file="../user-functions.R")
 
-ef_meta <- tibble(year = c(1998, 1999, 2000, 2001),
+ef_meta <- tibble(year = c(2001, 2000),
                   url = c("https://nces.ed.gov/ipeds/datacenter/data/ef2001a.zip",
-                          "https://nces.ed.gov/ipeds/datacenter/data/ef2000a.zip",
-                          "https://nces.ed.gov/ipeds/datacenter/data/ef99_anr.zip",
-                          "https://nces.ed.gov/ipeds/datacenter/data/ef98_anr.zip"),
+                          "https://nces.ed.gov/ipeds/datacenter/data/ef2000a.zip"),
                   file_name = c("ef2001a.csv",
-                                "ef2000a.csv",
-                                "ef99_anr.csv",
-                                "ef98_anr.csv"))
+                                "ef2000a.csv"))
 
 read_file <- function(url, file_name) {
 
@@ -116,13 +112,6 @@ system.time({
   })
 ```
 
-
-```{r}
-ef_raw %>%
-  filter(year == 2001) %>%
-  count(year, efalevel)
-```
-
 # Merge Data Into Needed Tables
 
 ## Detail Table
@@ -131,7 +120,7 @@ This table contains the published charges by type: tuition, fees, books and supp
 
 ```{r}
 fall_enrollment <- ef_raw %>%
-  mutate(date_key = (year * 10000) + 1015,
+  mutate(date_key = as.integer(str_c(year, "1015")),
          time_status = recode(efalevel,
                               `24` = "Full-time",
                               `25` = "Full-time",
