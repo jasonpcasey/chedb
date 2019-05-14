@@ -212,9 +212,7 @@ fall_enrollment <- fall_enrollment %>%
 ## Detail Table
 
 ```{r}
-system.time({
-  fall_enrollment %>%
-    append_db("ched-staging", "ipeds_fall_enrollment")
-})
+fall_enrollment %>%
+  append_db("ched-staging", "ipeds_fall_enrollment")
 ```
 
