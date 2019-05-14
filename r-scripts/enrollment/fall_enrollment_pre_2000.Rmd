@@ -9,10 +9,10 @@ params:
     value: "Y"
   start_year:
     label: "Start Year"
-    value: 1998
+    value: 1990
   end_year:
     label: "Ending Year"
-    value: 1999
+    value: 1997
 ---
 
 # Setup
@@ -34,11 +34,23 @@ knitr::knit_engines$set(python = reticulate::eng_python)
 # include user functions
 source(file="../user-functions.R")
 
-ef_meta <- tibble(year = c(1999, 1998),
-                  url = c("https://nces.ed.gov/ipeds/datacenter/data/ef99_anr.zip",
-                          "https://nces.ed.gov/ipeds/datacenter/data/ef98_anr.zip"),
-                  file_name = c("ef99_anr.csv",
-                                "ef98_anr.csv"))
+ef_meta <- tibble(year = 1990:1997,
+                  url = c("https://nces.ed.gov/ipeds/datacenter/data/ef90_a.zip",
+                          "https://nces.ed.gov/ipeds/datacenter/data/ef1991_a.zip",
+                          "https://nces.ed.gov/ipeds/datacenter/data/ef1992_a.zip",
+                          "https://nces.ed.gov/ipeds/datacenter/data/ef1993_a.zip",
+                          "https://nces.ed.gov/ipeds/datacenter/data/ef1994_anr.zip",
+                          "https://nces.ed.gov/ipeds/datacenter/data/ef95_anr.zip",
+                          "https://nces.ed.gov/ipeds/datacenter/data/ef96_anr.zip",
+                          "https://nces.ed.gov/ipeds/datacenter/data/ef97_anr.zip"),
+                  file_name = c("ef90_a.csv",
+                                "ef1991_a.csv",
+                                "ef1992_a.csv",
+                                "ef1993_a.csv",
+                                "ef1994_anr.csv",
+                                "ef95_anr.csv",
+                                "ef96_anr.csv",
+                                "ef97_anr.csv"))
 
 read_file <- function(url, file_name) {
 
@@ -175,8 +187,7 @@ fall_enrollment <- ef_raw %>%
   select(-survey)
 
 fall_enrollment %>%
-  filter(unitid == 181464,
-         date_key == 19991015)
+  filter(unitid == 181464)
 ```
 
 ## Check for Dupes
@@ -196,16 +207,6 @@ fall_enrollment %>%
 fall_enrollment <- fall_enrollment %>%
   group_by(unitid, date_key, time_status, career_level, degree_seeking, continuation_type, demographic_key) %>%
   summarize(headcount = sum(headcount, na.rm = TRUE))
-```
-
-
-```{r}
-fall_enrollment %>%
-  filter(unitid == 181464,
-         date_key == 19981015) %>%
-  group_by(efalevel, continuation_type) %>%
-  summarize(headcount = sum(headcount, na.rm = TRUE),
-            n = n())
 ```
 
 # Write to Database
