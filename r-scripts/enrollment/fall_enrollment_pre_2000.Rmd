@@ -6,13 +6,7 @@ output: html_notebook
 params:
   read_raw:
     label: "Read Raw"
-    value: "Y"
-  start_year:
-    label: "Start Year"
-    value: 1990
-  end_year:
-    label: "Ending Year"
-    value: 1997
+    value: "N"
 ---
 
 # Setup
@@ -34,7 +28,7 @@ knitr::knit_engines$set(python = reticulate::eng_python)
 # include user functions
 source(file="../user-functions.R")
 
-ef_meta <- tibble(year = 1990:1997,
+ef_meta <- tibble(year = 1990:1999,
                   url = c("https://nces.ed.gov/ipeds/datacenter/data/ef90_a.zip",
                           "https://nces.ed.gov/ipeds/datacenter/data/ef1991_a.zip",
                           "https://nces.ed.gov/ipeds/datacenter/data/ef1992_a.zip",
@@ -42,7 +36,9 @@ ef_meta <- tibble(year = 1990:1997,
                           "https://nces.ed.gov/ipeds/datacenter/data/ef1994_anr.zip",
                           "https://nces.ed.gov/ipeds/datacenter/data/ef95_anr.zip",
                           "https://nces.ed.gov/ipeds/datacenter/data/ef96_anr.zip",
-                          "https://nces.ed.gov/ipeds/datacenter/data/ef97_anr.zip"),
+                          "https://nces.ed.gov/ipeds/datacenter/data/ef97_anr.zip",
+                          "https://nces.ed.gov/ipeds/datacenter/data/ef98_anr.zip",
+                          "https://nces.ed.gov/ipeds/datacenter/data/ef99_anr.zip"),
                   file_name = c("ef90_a.csv",
                                 "ef1991_a.csv",
                                 "ef1992_a.csv",
@@ -50,7 +46,9 @@ ef_meta <- tibble(year = 1990:1997,
                                 "ef1994_anr.csv",
                                 "ef95_anr.csv",
                                 "ef96_anr.csv",
-                                "ef97_anr.csv"))
+                                "ef97_anr.csv",
+                                "ef98_anr.csv",
+                                "ef99_anr.csv"))
 
 read_file <- function(url, file_name) {
 
