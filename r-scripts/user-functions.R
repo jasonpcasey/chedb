@@ -2,6 +2,7 @@
 library(DBI)
 library(odbc)
 library(readxl)
+library(keyring)
 library(lubridate)
 library(kableExtra)
 library(tidyverse)
@@ -103,8 +104,8 @@ read_aaude_data <- function(dbString, query_string)
   # Open a connection
   connection <- dbConnect(odbc::odbc(),
                           dbString, 
-                          UID=rstudioapi::showPrompt('User ID','Enter User ID'),
-                          PWD=rstudioapi::askForPassword("Database Password"))
+                          UID = keyring::key_get("aaude_user"),
+                          PWD = keyring::key_get("mit_secret"))
   
   response <- dbSendQuery(connection, query_string)
   tbl <- dbFetch(response) %>%
