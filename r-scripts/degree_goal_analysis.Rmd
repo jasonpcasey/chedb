@@ -1,0 +1,172 @@
+---
+title: "Degree Goals"
+author: "Jason P. Casey"
+date: 2019-07-09
+output: html_notebook
+---
+
+# Setup
+
+Data setup:
+
+_read_raw_ parameter determines whether to do a data pull across the web.  This is costly, so only do so if new data need to be pulled.  Two options: Y or N.
+
+_start_year_ parameter determines the first year to be added.  Correspondingly,
+_end_year_ parameter sets the ending year.  Present values are based on the universe change in 2010 and the most recent year of available data.
+
+```{r setup}
+# knitr options
+knitr::opts_chunk$set(fig.width = 8,
+                      fig.asp = 0.618,
+                      echo = TRUE,
+                      warning = FALSE)
+knitr::knit_engines$set(python = reticulate::eng_python)
+
+# include user functions
+source(file="user-functions.R")
+
+```
+
+# Read Data
+
+## Institution Data
+
+```{r}
+system.time({
+  # c_raw <- read_db("ched-staging", "SELECT * FROM dbo.ipeds_degree_completions_fact")
+  # institutions <- read_db("ched-staging", "SELECT * FROM dbo.ipeds_institution_dimension") %>%
+  #   filter(control == "Public",
+  #          carnegie_2015 == "Doctoral Universities: Highest Research Activity")
+  # enr_raw <- read_db("ched-staging", "SELECT * FROM dbo.ipeds_fall_enrollment_fact WHERE headcount > 0")
+  # demo <- read_db("ched-staging", "SELECT * FROM dbo.ipeds_demographic_dimension")
+  deg <- 
+    read_db("ched-staging", "SELECT * FROM dbo.ipeds_degree_dimension")
+  # dates <- read_db("ched-staging", "SELECT * FROM dbo.date_dimension")
+  })
+```
+
+## Dates
+
+```{r}
+system.time({
+  dates <- 
+    read_db("ched-staging", "SELECT * FROM dbo.date_dimension")
+  })
+```
+
+## Demographics
+
+```{r}
+system.time({
+  demo <- 
+    read_db("ched-staging", "SELECT * FROM dbo.ipeds_demographic_dimension") %>%
+    mutate(urm = ifelse(str_sub(demographic_key, 1, 4) %in% c("2mor", "aian", "bkaa", "hisp", "nhpi"), 1, 0),
+         female = ifelse(sex == "Women", 1, 0))
+  })
+```
+
+## Enrollment
+
+```{r}
+system.time({
+  enrollment <- 
+    read_db("ched-staging", "SELECT * FROM dbo.ipeds_fall_enrollment_fact WHERE unitid = 181464") %>%
+    filter(career_level == "Undergraduate",
+           # continuation_type %in% c("Continuing", "Transfer"),
+           continuation_type == "First-time",
+           degree_seeking == "Degree-seeking") %>%
+    inner_join(dates) %>%
+    mutate(year = year + 4) %>%
+    group_by(year, demographic_key) %>%
+    summarize(headcount = sum(headcount))
+  })
+
+```
+
+# Merge Data Into Needed Tables
+
+```{r}
+system.time({
+  degrees <- 
+    read_db("ched-staging", "SELECT * FROM dbo.ipeds_degree_completions_fact WHERE unitid = 181464") %>%
+    filter(degree_key %in% c("051", "052")) %>%
+    inner_join(dates) %>%
+    group_by(year, demographic_key) %>%
+    summarize(bachelors = sum(awards))
+  })
+
+```
+
+```{r}
+merged_df <-
+  enrollment %>%
+  left_join(degrees) %>%
+  inner_join(demo) %>%
+  filter(headcount > 0,
+         bachelors > 0) %>%
+  select(year, race_ethnicity, sex, urm, female, headcount, bachelors)
+
+merged_df
+```
+
+# Look at Relationships
+
+## Non-white
+
+```{r}
+merged_df %>%
+  filter(race_ethnicity != "White") %>%
+  group_by(year, race_ethnicity) %>%
+  summarize(headcount = sum(headcount),
+            bachelors = sum(bachelors)) %>%
+  ungroup() %>%
+  ggplot(aes(x = headcount, y = bachelors, color = race_ethnicity)) +
+  geom_point()
+```
+
+## White
+
+```{r}
+merged_df %>%
+  filter(race_ethnicity == "White") %>%
+  group_by(year, race_ethnicity) %>%
+  summarize(headcount = sum(headcount),
+            bachelors = sum(bachelors)) %>%
+  ungroup() %>%
+  ggplot(aes(x = headcount, y = bachelors, color = race_ethnicity)) +
+  geom_point()
+```
+
+```{r}
+merged_df %>%
+  mutate(re = recode(race_ethnicity,
+                     "Non-resident Alien" = "International",
+                     "American Indian or Alaska Native" = "Other",
+                     "Native Hawaiian or Other Pacific Islander" = "Other",
+                     "Two or More Races" = "Other",
+                     # "Unknown" = "Other",
+                     .default = race_ethnicity)) %>%
+  group_by(year, re, sex) %>%
+  summarize(headcount = sum(headcount),
+            bachelors = sum(bachelors)) %>%
+  ungroup() %>%
+  ggplot(aes(x = headcount, y = bachelors)) +
+  geom_point() +
+  facet_grid(re ~ sex)
+
+```
+
+# Run a Model
+
+```{r}
+mod <- 
+  merged_df %>%
+  lm(bachelors ~ headcount + urm * female, data = .)
+
+summary(mod)
+```
+
+```{r}
+plot(mod)
+```
+
