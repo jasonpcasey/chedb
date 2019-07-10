@@ -115,44 +115,61 @@ merged_df
 
 ```{r}
 merged_df %>%
+  mutate(race_ethnicity = recode(race_ethnicity,
+                                 "Non-resident Alien" = "International",
+                                 "American Indian or Alaska Native" = "Other",
+                                 "Native Hawaiian or Other Pacific Islander" = "Other",
+                                 "Two or More Races" = "Other",
+                                 # "Unknown" = "Other",
+                                 .default = race_ethnicity)) %>%
   filter(race_ethnicity != "White") %>%
   group_by(year, race_ethnicity) %>%
   summarize(headcount = sum(headcount),
             bachelors = sum(bachelors)) %>%
   ungroup() %>%
-  ggplot(aes(x = headcount, y = bachelors, color = race_ethnicity)) +
-  geom_point()
+  ggplot(aes(x = headcount, y = bachelors)) +
+  geom_point(aes(color = race_ethnicity)) +
+  geom_smooth()
 ```
 
 ## White
 
 ```{r}
 merged_df %>%
+  mutate(race_ethnicity = recode(race_ethnicity,
+                                 "Non-resident Alien" = "International",
+                                 "American Indian or Alaska Native" = "Other",
+                                 "Native Hawaiian or Other Pacific Islander" = "Other",
+                                 "Two or More Races" = "Other",
+                                 # "Unknown" = "Other",
+                                 .default = race_ethnicity)) %>%
   filter(race_ethnicity == "White") %>%
   group_by(year, race_ethnicity) %>%
   summarize(headcount = sum(headcount),
             bachelors = sum(bachelors)) %>%
   ungroup() %>%
-  ggplot(aes(x = headcount, y = bachelors, color = race_ethnicity)) +
-  geom_point()
+  ggplot(aes(x = headcount, y = bachelors)) +
+  geom_point(aes(color = race_ethnicity)) +
+  geom_smooth()
 ```
 
 ```{r}
 merged_df %>%
-  mutate(re = recode(race_ethnicity,
-                     "Non-resident Alien" = "International",
-                     "American Indian or Alaska Native" = "Other",
-                     "Native Hawaiian or Other Pacific Islander" = "Other",
-                     "Two or More Races" = "Other",
-                     # "Unknown" = "Other",
-                     .default = race_ethnicity)) %>%
-  group_by(year, re, sex) %>%
+  mutate(race_ethnicity = recode(race_ethnicity,
+                                 "Non-resident Alien" = "International",
+                                 "American Indian or Alaska Native" = "Other",
+                                 "Native Hawaiian or Other Pacific Islander" = "Other",
+                                 "Two or More Races" = "Other",
+                                 # "Unknown" = "Other",
+                                 .default = race_ethnicity)) %>%
+  group_by(year, race_ethnicity, sex) %>%
   summarize(headcount = sum(headcount),
             bachelors = sum(bachelors)) %>%
   ungroup() %>%
   ggplot(aes(x = headcount, y = bachelors)) +
-  geom_point() +
-  facet_grid(re ~ sex)
+  geom_point(aes(color = race_ethnicity)) +
+  geom_smooth() +
+  facet_grid(race_ethnicity ~ sex)
 
 ```
 
