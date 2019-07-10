@@ -33,15 +33,8 @@ source(file="user-functions.R")
 
 ```{r}
 system.time({
-  # c_raw <- read_db("ched-staging", "SELECT * FROM dbo.ipeds_degree_completions_fact")
-  # institutions <- read_db("ched-staging", "SELECT * FROM dbo.ipeds_institution_dimension") %>%
-  #   filter(control == "Public",
-  #          carnegie_2015 == "Doctoral Universities: Highest Research Activity")
-  # enr_raw <- read_db("ched-staging", "SELECT * FROM dbo.ipeds_fall_enrollment_fact WHERE headcount > 0")
-  # demo <- read_db("ched-staging", "SELECT * FROM dbo.ipeds_demographic_dimension")
   deg <- 
     read_db("ched-staging", "SELECT * FROM dbo.ipeds_degree_dimension")
-  # dates <- read_db("ched-staging", "SELECT * FROM dbo.date_dimension")
   })
 ```
 
@@ -76,14 +69,13 @@ system.time({
            continuation_type == "First-time",
            degree_seeking == "Degree-seeking") %>%
     inner_join(dates) %>%
-    mutate(year = year + 4) %>%
     group_by(year, demographic_key) %>%
     summarize(headcount = sum(headcount))
   })
 
 ```
 
-# Merge Data Into Needed Tables
+## Degrees
 
 ```{r}
 system.time({
@@ -97,9 +89,12 @@ system.time({
 
 ```
 
+# Merge Data Into Needed Tables
+
 ```{r}
 merged_df <-
   enrollment %>%
+  # mutate(year = year + 4) %>%
   left_join(degrees) %>%
   inner_join(demo) %>%
   filter(headcount > 0,
@@ -108,6 +103,30 @@ merged_df <-
 
 merged_df
 ```
+
+# Lagged Cross-correlations
+
+```{r}
+merged_df %>%
+  group_by(year) %>%
+  summarize(enrollment = sum(headcount, na.rm = TRUE),
+            bachelors = sum(bachelors, na.rm = TRUE)) %>%
+  ungroup()
+```
+
+
+```{r}
+ccf_values <-
+  merged_df %>%
+  group_by(year) %>%
+  summarize(enrollment = sum(headcount, na.rm = TRUE),
+            bachelors = sum(bachelors, na.rm = TRUE)) %>%
+  ungroup() %>%
+  ccf(x = .$enrollment, y = .$bachelors)
+
+ccf_values
+```
+
 
 # Look at Relationships
 
@@ -162,6 +181,33 @@ merged_df %>%
                                  "Two or More Races" = "Other",
                                  # "Unknown" = "Other",
                                  .default = race_ethnicity)) %>%
+  group_by(year, race_ethnicity, sex) %>%
+  summarize(headcount = sum(headcount),
+            bachelors = sum(bachelors)) %>%
+  ungroup() %>%
+  ggplot(aes(x = headcount, y = bachelors)) +
+  geom_point(aes(color = race_ethnicity)) +
+  geom_smooth() +
+  facet_grid(race_ethnicity ~ sex)
+
+```
+
+
+```{r}
+merged_df %>%
+  mutate(race_ethnicity = recode(race_ethnicity,
+                                 "Non-resident Alien" = 0,
+                                 "White" = 3,
+                                 "Unknown" = 4,
+                                 "Asian" = 2,
+                                 .default = 1),
+         race_ethnicity = factor(race_ethnicity,
+                                 levels = 0:4,
+                                 labels = c("International",
+                                            "URM",
+                                            "Asian",
+                                            "White",
+                                            "Unknown"))) %>%
   group_by(year, race_ethnicity, sex) %>%
   summarize(headcount = sum(headcount),
             bachelors = sum(bachelors)) %>%
