@@ -1,0 +1,250 @@
+---
+title: "Load IPEDS Institutions"
+author: "Jason P. Casey"
+date: 2018-11-21
+output: html_notebook
+params:
+  read_raw:
+    label: "Read Raw"
+    value: "Y"
+  start_year:
+    label: "Start Year"
+    value: 2010
+  end_year:
+    label: "Ending Year"
+    value: 2017
+---
+
+# Setup
+
+Data setup:
+
+_read_raw_ parameter determines whether to do a data pull across the web.  This is costly, so only do so if new data need to be pulled.  Two options: Y or N.
+
+_start_year_ parameter determines the first year to be added.  Correspondingly,
+_end_year_ parameter sets the ending year.  Present values are based on the universe change in 2010 and the most recent year of available data.
+
+```{r setup}
+# knitr options
+knitr::opts_chunk$set(fig.width = 8,
+                      fig.asp = 0.618,
+                      echo = TRUE)
+knitr::knit_engines$set(python = reticulate::eng_python)
+
+# include user functions
+source(file="../user-functions.R")
+
+# Load tables
+big_10 <- c(145637, 147767, 151351, 153658, 163286, 170976, 171100,
+            174066, 181464, 186380, 204796, 214777, 240444, 243780)
+
+regents <- c(181464, 153658, 153603, 126614,
+             126818, 145637, 155317, 174066,
+             178396, 204796, 243780)
+
+overlap <- c(100751, 122409, 126818, 137351,
+             145600, 153603, 153658, 155317,
+             155399, 159391, 171128, 178396,
+             181464, 196060, 207500, 209542,
+             228787, 232186, 236939, 445188)
+
+nu <- c(181464, 181428, 181747, 181394, 181215)
+
+mo_yr <- function(date_string) {
+  my_month <- str_extract(date_string, "^\\d{2}")
+  my_year <- str_extract(date_string, "\\d{4}$")
+  
+  my_date <- lubridate::make_date(my_year, my_month, 1)
+  
+  answer <- str_c(my_month,
+        "/",
+        str_pad(days_in_month(my_date), 2, pad = "0"),
+        "/",
+        my_year)
+  
+  return(answer)
+}
+
+
+
+fix_binary <- function(x) {
+  recode(x,
+         `1` = 1,
+         `2` = 0)
+}
+
+
+
+read_files <- function(file1, file2) {
+  url <- "https://nces.ed.gov/ipeds/datacenter/data/"
+  
+  spec1 <- str_c(url, file1, ".zip")
+  spec2 <- str_c(url, file2, ".zip")
+  
+  file1 <- str_c(file1, ".csv")
+  file2 <- str_c(file2, ".csv")
+  
+  details <- net_load_zip(spec2, file2)
+  
+  recordset <- net_load_zip(spec1, file1) %>%
+    rename_all(tolower) %>%
+    rename(institution_name = instnm,
+           state_abbreviation = stabbr,
+           address = addr,
+           web_address = webaddr) %>%
+    left_join(details, by = "unitid") %>%
+    left_join(nsf_institutions, by = "unitid") %>%
+    mutate(unitid = as.integer(unitid),
+           regents_peer = ifelse(unitid %in% regents, 1, 0),
+           is_un = ifelse(unitid %in% nu, 1, 0),
+           zip = as.character(zip),
+           fips = as.integer(fips),
+           service_academy = ifelse(as.integer(obereg) == 0, 1, 0),
+           closedat = ifelse(is.na(closedat), "", closedat),
+           closedat = ifelse(str_length(closedat) < 3, "", closedat),
+           closedat = ifelse(str_detect(closedat, "^\\d{2}/\\d{4}$"),
+                             mo_yr(closedat),
+                             closedat),
+           close_date = mdy(closedat),
+           institution_level = recode(as.integer(iclevel),
+                                      `1` = "Four or more years",
+                                      `2` = "At least 2 but less than 4 years",
+                                      `3` = "Less than 2 years (below associate)",
+                                      .default = "Unknown"),
+           control = recode(as.integer(control),
+                            `1` = "Public",
+                            `2` = "Private not-for-profit",
+                            `3` = "Private for-profit",
+                            .default = "Unknown"),
+           highest_level_offering = recode(as.integer(hloffer),
+                                           `1` = "Award of less than one academic year",
+                                           `2` = "At least 1, but less than 2 academic yrs",
+                                           `3` = "Associate's degree",
+                                           `4` = "At least 2, but less than 4 academic yrs",
+                                           `5` = "Bachelor's degree",
+                                           `6` = "Postbaccalaureate certificate",
+                                           `7` = "Master's degree",
+                                           `8` = "Post-master's certificate",
+                                           `9` = "Doctor's degree",
+                                           .default = "Unknown"),
+           highest_degree_offering = recode(as.integer(hdegofr1),
+                                            `11` = "Doctor's degree - research/scholarship and professional practice",
+                                            `12` = "Doctor's degree - research/scholarship",
+                                            `13` = "Doctor's degree -  professional practice",
+                                            `14` = "Doctor's degree - other",
+                                            `20` = "Master's degree",
+                                            `30` = "Bachelor's degree",
+                                            `40` = "Associate's degree",
+                                            `0` = "Non-degree granting",
+                                            .default = "Unknown"),
+           locale = recode(as.integer(locale),
+                           `11` = "City: Large",
+                           `12` = "City: Midsize",
+                           `13` = "City: Small",
+                           `21` = "Suburb: Large",
+                           `22` = "Suburb: Midsize",
+                           `23` = "Suburb: Small",
+                           `31` = "Town: Fringe",
+                           `32` = "Town: Distant",
+                           `33` = "Town: Remote",
+                           `41` = "Rural: Fringe",
+                           `42` = "Rural: Distant",
+                           `43` = "Rural: Remote",
+                           .default = "Unknown"),
+           parent_id = ifelse(newid > 0, newid, unitid),
+           year_closed = ifelse(as.integer(deathyr) > 0, as.integer(deathyr), NA),
+           cbsa_id = as.integer(cbsa),
+           cbsa_type = recode(as.integer(cbsatype),
+                              `1` = "Metropolitan Statistical Area",
+                              `2` = "Micropolitan Statistical Area",
+                              .default = "No CBSA"),
+           csa_id = as.integer(csa),
+           county_fips = as.integer(countycd),
+           longitude = as.numeric(longitud),
+           latitude = as.numeric(latitude),
+           system_member = fix_binary(as.integer(f1systyp)),
+           system_name = ifelse(str_trim(as.character(f1sysnam)) %in% c("-1", "-2", "-3"),
+                                NA, as.character(f1sysnam)),
+           undergraduate_offering = fix_binary(as.integer(ugoffer)),
+           graduate_offering = fix_binary(as.integer(groffer)),
+           degree_granting = fix_binary(as.integer(deggrant)),
+           open_to_public = ifelse(as.integer(openpubl)==1, 1, 0),
+           landgrant = fix_binary(as.integer(landgrnt)),
+           hbcu = fix_binary(as.integer(hbcu)),
+           hospital = fix_binary(as.integer(hospital)),
+           medical = fix_binary(as.integer(medical)),
+           nsf_medical_school = ifelse(as.integer(medical_school)==1, 1, 0),
+           tribal = fix_binary(as.integer(tribal)),
+           postsecondary_institution = recode(as.integer(postsec),
+                                              `1` = "Primarily postsecondary institution",
+                                              `2` = "Not primarily postsecondary",
+                                              `3` = "Not postsecondary",
+                                              .default = "Unknown"),
+           rotc = recode(as.integer(slo5),
+                         `1` = 1,
+                         `0` = 0),
+           confno1 = as.integer(confno1),
+           confno2 = as.integer(confno2),
+           confno3 = as.integer(confno3),
+           confno4 = as.integer(confno4),
+           active = ifelse(as.integer(cyactive)==1, 1, 0)) %>%
+    select(unitid, institution_name, address, city, zip,
+           web_address, fips, county_fips, service_academy,
+           institution_level, control, highest_level_offering, highest_degree_offering,
+           undergraduate_offering, graduate_offering, degree_granting, 
+           regents_peer, is_un, locale, parent_id, year_closed, close_date,
+           cbsa_id, cbsa_type, csa_id, longitude, latitude,
+           system_member, system_name, open_to_public, landgrant,
+           hbcu, hospital, medical, nsf_medical_school, tribal, rotc,
+           confno1, confno2, confno3, confno4
+           )
+}
+
+if (params$read_raw == "Y") {
+  # load dependencies
+  states <- read_db("ched-staging", "SELECT * FROM states")
+  institution_names <- read_excel("../../data/institution-names.xlsx")
+  nsf_institutions <- read_db("ched-staging", "SELECT unitid_xwalk AS unitid, med_sch_flag AS medical_school FROM nsf_ipeds_bridge") %>%
+    group_by(unitid) %>%
+    summarize(medical_school = max(medical_school))
+
+  ic_meta <- tibble(year = seq(params$start_year, params$end_year)) %>%
+    mutate(data = map2(str_c("hd", year), str_c("ic", year), read_files))
+  
+  institutions <- ic_meta %>%
+    select(year, data) %>%
+    unnest() %>%
+    mutate(date_key = (year * 10000) + 0901)
+  
+  institutions %>%
+    write_db("ched-staging", "ipeds_institutions")
+  
+  rm(ic_meta, states, institution_names, nsf_institutions, institutions)
+  
+}
+
+```
+
+# Read Data
+
+```{r}
+system.time({
+  institutions <- read_db("ched-staging", "SELECT * FROM dbo.ipeds_institutions")
+  })
+```
+
+# Check for Dupes
+
+```{r}
+institutions %>%
+  count(unitid, date_key) %>%
+  filter(n > 1)
+```
+
+# Merge Data
+
+```{r}
+institutions %>%
+  filter(is_un == 1)
+```
+
