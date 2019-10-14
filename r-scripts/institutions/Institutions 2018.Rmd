@@ -12,7 +12,7 @@ params:
     value: 2010
   end_year:
     label: "Ending Year"
-    value: 2017
+    value: 2018
 ---
 
 # Setup
@@ -200,6 +200,12 @@ read_files <- function(file1, file2) {
            )
 }
 
+
+```
+
+# Load Data
+
+```{r}
 if (params$read_raw == "Y") {
   # load dependencies
   states <- read_db("ched-staging", "SELECT * FROM states")
@@ -214,10 +220,11 @@ if (params$read_raw == "Y") {
   institutions <- ic_meta %>%
     select(year, data) %>%
     unnest() %>%
-    mutate(date_key = (year * 10000) + 0901)
+    mutate(date_key = ymd((year * 10000) + 0901)) %>%
+    select(-year)
   
   institutions %>%
-    write_db("ched-staging", "ipeds_institutions")
+    insert_db("ched-dev", "ipeds_institutions")
   
   rm(ic_meta, states, institution_names, nsf_institutions, institutions)
   
