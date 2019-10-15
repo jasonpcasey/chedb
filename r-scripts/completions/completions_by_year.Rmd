@@ -177,7 +177,7 @@ system.time({
 
 ```{r}
 degree_completions <- c_raw %>%
-  mutate(date_key = (year * 10000) + 1015,
+  mutate(date_key = ymd((year * 10000) + 1015),
          degree_key = str_c(awlevel, majornum),
          award_level = recode(awlevel,
                               `3` = "Associate's degree",
