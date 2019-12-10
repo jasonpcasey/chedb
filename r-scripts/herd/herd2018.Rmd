@@ -1,0 +1,143 @@
+---
+title: "HERD 2018 Notebook"
+author: "Jason P. Casey"
+date: 2018-11-20
+output: html_notebook
+---
+
+# Setup
+
+Data setup:
+
+
+
+
+THIS _nsf_ipeds_bridge_ SCRIPT MUST BE RUN PRIOR TO RUNNING THIS SCRIPT
+
+
+
+
+
+```{r setup}
+knitr::opts_chunk$set(fig.width = 8,
+                      fig.asp = 0.618,
+                      echo = TRUE)
+knitr::knit_engines$set(python = reticulate::eng_python)
+
+# include user functions
+source(file="../user-functions.R")
+
+system.time({
+  herd <- read_db("ched-staging", "SELECT * FROM dbo.raw_herd")
+})
+```
+
+# Inspect Contents of HERD Table
+
+```{r}
+herd %>%
+  count(questionnaire_no, question, row, column)
+```
+
+# Create Data Tables
+
+## Institution Level Data Table
+
+Institutional totals for things like Medical School Expenditures, Total R&D, etc.
+
+```{r}
+fix_null <- function(x) {
+  ifelse(is.na(x), 0, x)
+}
+
+inst_data <- herd %>%
+  filter(questionnaire_no %in% c("01.a", "01.b", "01.c", "01.d", "01.e", "01.f", "01.g",
+                                 "04")) %>%
+  rename(unitid = unitid_xwalk) %>%
+  select(inst_id:inst_zip, questionnaire_no, data) %>%
+  mutate(data = data * 1000) %>%
+  spread(key = "questionnaire_no", value = "data") %>%
+  mutate(date_key = (year_id * 10000) + 0630,
+         federal_government = fix_null(`01.a`),
+         state_and_local_government = fix_null(`01.b`),
+         business = fix_null(`01.c`),
+         nonprofit_organizations = fix_null(`01.d`),
+         institutional_funds = fix_null(`01.e`),
+         other_sources = fix_null(`01.f`),
+         total_rd_expenses = fix_null(`01.g`),
+         medical_school_expenses = fix_null(`04`),
+         non_medical_rd = total_rd_expenses - medical_school_expenses) %>%
+  select(inst_id, ncses_inst_id, unitid, date_key, hbcu_flag:inst_zip, federal_government:non_medical_rd)
+
+inst_data
+```
+
+## Detail Data Table
+
+Data by academic field and funding agency.
+
+```{r}
+herd_details <- herd %>%
+  mutate(data = ifelse(is.na(data), 0, data * 1000),
+         date_key = (year_id * 10000) + 0630) %>%
+  filter(column %in% c("DOD",
+                       "DOE",
+                       "HHS",
+                       "NASA",
+                       "NSF",
+                       "USDA",
+                       "Other agencies",
+                       "State and local government",
+                       "Business",
+                       "Institution funds",
+                       "Nonprofit organziations")) %>%
+  separate(questionnaire_no, c("rownum","academic_field_key"), 2) %>%
+  filter(as.integer(rownum) %in% c(9, 11),
+         academic_field_key %in% c('A','B01','B02','B03','B04','B05','B06','B07','B08',
+                                  'B09','C01','C02','C03','C04','D01','D02','D03','D04',
+                                  'D05','E','F01','F02','F03','F04','F05','G','H01',
+                                  'H02','H03','H04','H05','I','J01','J02','J03','J04',
+                                  'J05','J06','J07','J08')) %>%
+  mutate(funding_type = recode(as.integer(rownum),
+                `9`="Federal",
+                `11`="Non-federal"),
+         agency_key = recode(column,
+                             "DOD" = "DOD",
+                             "DOE" = "DOE",
+                             "HHS" = "HHS",
+                             "NASA" = "NAS",
+                             "NSF" = "NSF",
+                             "USDA" = "USD",
+                             "Other agencies" = "OTH",
+                             "State and local government" = "SLG",
+                             "Business" = "BUS",
+                             "Institution funds" = "INS",
+                             "Nonprofit organziations" = "NPO",
+                             .default = "Unknown")) %>%
+  rename(unitid = unitid_xwalk) %>%
+  select(inst_id, ncses_inst_id, unitid, date_key, funding_type, agency_key, academic_field_key, expenditure = data)  %>%
+  group_by(inst_id, ncses_inst_id, unitid, date_key, funding_type, agency_key, academic_field_key) %>%
+  summarise(expenditure = sum(expenditure, na.rm = TRUE)) %>%
+  ungroup()
+
+herd_details
+```
+
+# Write Records to Database
+
+## Institution Data
+
+```{r}
+inst_data %>%
+  write_db("ched-staging", "nsf_herd_institution_data")
+```
+
+## Detail Data
+
+```{r}
+herd_details %>%
+  write_db("ched-staging", "nsf_herd_detail_data")
+```
+
+
+
